@@ -1,7 +1,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 
-import { errorHandler } from "./middlewares/errorMiddleware.js";
+import { errorHandler } from "./middlewares/errorHandler.middleware.js";
 import connectDB from "./services/db.service.js";
 
 // express app
@@ -29,6 +29,10 @@ app.get("/", (req, res) => res.send("BidVault Online Auction System") );
 // auth routes
 import authRoutes from "./routes/auth.routes.js";
 app.use("/bidvault/auth", authRoutes);
+
+// admin routes
+import adminRoutes from "./routes/admin.routes.js";
+app.use("/bidvault/admin", adminRoutes);
 
 // error handling middleware
 app.use(errorHandler);   

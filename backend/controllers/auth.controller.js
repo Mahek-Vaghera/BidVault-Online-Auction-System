@@ -11,10 +11,6 @@ export const handleRegister = catchErrors(async (req, res) => {
 
     // take data from body
     const {username, email, password} = req.body;
-    // validate data
-    if (!username || !email || !password) {
-        return res.status(400).json({message: "All fields are required"});
-    }
 
     // Check if user already exists
     const existingUser = await User.findOne({ email})
@@ -46,10 +42,6 @@ export const verifyEmail = catchErrors(async (req, res)=> {
     
     // take data from body
     const { email, code } = req.body;
-    // validate data 
-    if (!email || !code) {
-        return res.status(400).json({ message: "All fields are required" });
-    }
 
     // find user
     const user = await User.findOne({ email, verificationCode: code });
@@ -73,10 +65,6 @@ export const handleLogin = catchErrors(async (req, res) => {
 
     // take data from body
     const { email, password } = req.body;
-    // validate data
-    if (!email || !password) {
-        return res.status(400).json({ message: "Provide email and password" });
-    }
 
     // find user
     const user = await User.findOne({ email });  
@@ -114,10 +102,6 @@ export const handleLogout = catchErrors(async (req, res) => {
 export const handleResetPwdEmail = catchErrors(async (req, res) => {
     // take data from body
     const { email } = req.body;
-    // validate data
-    if (!email) {
-      return res.status(400).json({ message: "Enter your verified email" });
-    }
 
     // find user
     const user = await User.findOne({ email });
@@ -148,10 +132,6 @@ export const handleResetPwdEmail = catchErrors(async (req, res) => {
 export const handleResetPwd = catchErrors(async (req, res) => {
     // take data from body
     const { email, newPassword, confirmNewPassword } = req.body;
-    // validate data
-    if (!email || !newPassword || !confirmNewPassword) {
-      return res.status(400).json({ message: "All fields are required" });
-    }
 
     // find user
     const user = await User.findOne({ email });
