@@ -34,6 +34,13 @@ app.use("/bidvault/auth", authRoutes);
 import adminRoutes from "./routes/admin.routes.js";
 app.use("/bidvault/admin", adminRoutes);
 
+import auctionRoutes from "./routes/auction.routes.js";
+app.use("/bidvault/auctions", auctionRoutes);
+
+// bid routes
+import bidRoutes from "./routes/bid.routes.js";
+app.use("/bidvault/auctions/:auctionId", bidRoutes);
+
 // error handling middleware
 app.use(errorHandler);   
 

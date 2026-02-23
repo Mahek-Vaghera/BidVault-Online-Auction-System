@@ -3,11 +3,13 @@ import {
     handleCreateAuction,
     handleDeleteAuction,
     handleEditAuction,
-    handleRegisterInAuction
+    handleRegisterInAuction,
+    listAuctions,
+    getAuction
 } from "../controllers/auction.controller.js";
 
 // middlewares
-import { restrictToLoggedinUserOnly } from "../middlewares/auth.middleware.js";
+import { restrictToLoggedInUserOnly } from "../middlewares/auth.middleware.js";
 import upload from "../middlewares/upload.middleware.js";
 import { validateFields } from "../middlewares/validateFields.middleware.js";
 import { validateAuctionPayload, validateAuctionEditPayload } from "../middlewares/auction.middleware.js";
@@ -34,31 +36,31 @@ router.post("/create",
 );
 
 router.patch("/:auctionId", 
-    restrictToLoggedinUserOnly, 
+    restrictToLoggedInUserOnly, 
     upload.array("images", 5),
     validateAuctionEditPayload, 
     handleEditAuction
 );
 
 router.delete("/:auctionId", 
-    restrictToLoggedinUserOnly, 
+    restrictToLoggedInUserOnly, 
     handleDeleteAuction
 );
 
 router.post("/:auctionId/register", 
-    restrictToLoggedinUserOnly, 
+    restrictToLoggedInUserOnly, 
     handleRegisterInAuction
 );
 
 // get list of auctions with status filter
 // only latest 20 auctions
 router.get("/?status=:status",
-    restrictToLoggedinUserOnly,
+    restrictToLoggedInUserOnly,
     listAuctions
 );
 
 router.get("/:auctionId", 
-    restrictToLoggedinUserOnly,
+    restrictToLoggedInUserOnly,
     getAuction
 );
 

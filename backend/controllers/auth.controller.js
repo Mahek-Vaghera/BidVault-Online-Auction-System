@@ -24,7 +24,7 @@ export const handleRegister = catchErrors(async (req, res) => {
     const verificationCode = Math.floor(100000 + Math.random() *900000).toString();
 
     // create user
-    User.create({
+    await User.create({
         username,
         email,
         password: hashedPassword,

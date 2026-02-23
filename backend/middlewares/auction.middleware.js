@@ -1,5 +1,6 @@
-import { catchErrors } from "./errorHandler.middleware.js";
-import cloudinary from "../utils/cloudinary.js";
+import { catchErrors } from "../utils/catchErrors.js";
+import cloudinary from "../config/cloudinary.config.js";
+import Auction from "../models/auction.model.js";
 import Product from "../models/product.model.js";
 
 // validate auction payload, upload images to cloudinary and create product

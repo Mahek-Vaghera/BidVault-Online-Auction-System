@@ -55,7 +55,12 @@ const auctionSchema = new mongoose.Schema({
         type: Date, 
         required: true 
     },
-
+     autoBidders: [
+        {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'user',
+        },
+    ],
     registrationsStartTime: {
         type: Date,
         default: null
