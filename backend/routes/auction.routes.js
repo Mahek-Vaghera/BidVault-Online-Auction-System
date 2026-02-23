@@ -4,6 +4,7 @@ import {
     handleDeleteAuction,
     handleEditAuction,
     handleRegisterInAuction,
+    handlePayment,
     listAuctions,
     getAuction
 } from "../controllers/auction.controller.js";
@@ -17,7 +18,7 @@ import { validateAuctionPayload, validateAuctionEditPayload } from "../middlewar
 const router = express.Router();
 
 router.post("/create", 
-    restrictToLoggedinUserOnly, 
+    restrictToLoggedInUserOnly, 
     upload.array("images", 5),
     validateFields([
         "title", 
@@ -43,7 +44,7 @@ router.patch("/:auctionId",
 );
 
 router.delete("/:auctionId", 
-    restrictToLoggedInUserOnly, 
+    restrictToLoggedInUserOnly,
     handleDeleteAuction
 );
 
@@ -52,9 +53,15 @@ router.post("/:auctionId/register",
     handleRegisterInAuction
 );
 
+// when auction ends, winner need to pay pay the amount
+router.post("/:auctionId/pay",
+    restrictToLoggedInUserOnly,
+    handlePayment
+);
+
 // get list of auctions with status filter
 // only latest 20 auctions
-router.get("/?status=:status",
+router.get("/",
     restrictToLoggedInUserOnly,
     listAuctions
 );

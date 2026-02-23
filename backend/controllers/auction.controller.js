@@ -1,6 +1,6 @@
 import Auction from "../models/auction.model.js";
 import User from "../models/user.model.js"
-import Product from "../models/product.model.js";
+import Payment from "../models/payment.model.js";
 import { catchErrors } from "../utils/catchErrors.js";
 
 // create auction
@@ -124,11 +124,11 @@ export const handleDeleteAuction = catchErrors(async (req, res) => {
  * Registration starts at registrationsStartTime,
  * and ends at auction start time.
  * 
- * bidvault/auctions/:auctionId/au-registration
+ * user click on register -> bidvault/auctions/:auctionId/register
  *        
  *        email: .........
  *            
- *            |pay| <- click (Razorpay -> payment gateway -> success)
+ *            |pay| <- click (Razorpay QR code -> payment gateway -> success)
  * 
  * After successful payment, user registered in the auction.
  */
@@ -137,6 +137,8 @@ export const handleRegisterInAuction = catchErrors(async (req, res) => {
     // take data from req
     const { email } = req.body;
     const { auctionId } = req.params;
+    const userId = req.user._id;
+
     // find auction
     const auction = await Auction.findById(auctionId);
     if (!auction) {
@@ -166,13 +168,63 @@ export const handleRegisterInAuction = catchErrors(async (req, res) => {
         return res.status(400).json({ success: false, message: "User already registered in this auction" });
     }
 
-    // register user in auction
+    // payment logic here (integrate with Razorpay or any other payment gateway)
+    // payment object for track
+    await Payment.create({
+        userId,
+        auctionId,
+        amount: (0.1 * auction.startingPrice), // registration fees is 10% of starting price
+        status: "PENDING",
+        type: "REGISTRATION FEES",
+    })
+    // after successful payment, register user in auction
     auction.registrations.push(user._id);
     auction.totalParticipants = auction.registrations.length;
     await auction.save();
 
 
     return res.json({ success: true, message: "User registered in the auction successfully" });
+});
+
+/**
+ * After auction ends, winner need to pay the amount.
+ * 
+ * Only winner can pay -> bidvault/auctions/:auctionId/pay
+ * 
+ *          Razorpay integration -> payment gateway -> success
+ * 
+ * assuming payment is successful, then update auction status to "COMPLETED"
+ * and save payment details in Payment collection for track.
+ */
+export const handlePayment = catchErrors(async (req, res) => {
+
+    // take data from req
+    const { auctionId } = req.params;
+    const userId = req.user._id;
+
+    // find auction
+    const auction = await Auction.findById(auctionId);
+    if (!auction) {
+        return res.status(400).json({ success: false, message: "Auction not found" });
+    }
+
+    // only winner can pay
+    if (auction.winner.toString() !== userId.toString()) {
+        return res.status(401).json({ success: false, message: "Unauthorized to pay for this auction" });
+    }
+
+    // payment logic here (integrate with Razorpay or any other payment gateway)
+    // payment object for track
+    await Payment.create({
+        userId,
+        auctionId,
+        amount: auction.currentBid,
+        status: "PENDING",
+        type: "WINNING PAYMENT",
+    })
+    // after successful payment, update auction status to "COMPLETED"
+    auction.status = "COMPLETED";
+    await auction.save();
 });
 
 // get list of auctions with status filter
@@ -185,7 +237,6 @@ export const listAuctions = catchErrors(async (req, res) => {
     
     res.status(200).json({ success: true, result });
 });
-
 
 // get particular auction details
 export const getAuction = catchErrors(async (req, res) => {
