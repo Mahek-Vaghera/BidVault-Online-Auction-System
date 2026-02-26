@@ -2,6 +2,8 @@ import Auction from "../models/auction.model.js";
 import User from "../models/user.model.js"
 import Payment from "../models/payment.model.js";
 import { catchErrors } from "../utils/catchErrors.js";
+import { pushAdminNotification } from "../services/notification.service.js";
+import { createAuctionLog } from "../services/log.service.js";
 
 // create auction
 export const handleCreateAuction = catchErrors(async (req, res) => {
@@ -46,10 +48,27 @@ export const handleCreateAuction = catchErrors(async (req, res) => {
         registrationsStartTime: regOpenTime,
         registrations: [],
         totalBids: 0,
-        totalParticipants: 0,
     });
         
-    
+    // push admin notification
+    await pushAdminNotification({
+        auctionId: auction._id,
+        userId: userId,
+        type: "AUCTION_VERIFICATION",
+        message: `New auction created by ${user.name} - ${auction.title}`,
+    });
+
+    // logs
+    await createAuctionLog({
+        auctionId: auction._id,
+        userId: userId,
+        userName: user.name,
+        type: "AUCTION_CREATED",
+        details: {
+            auction: auction
+        }
+    });
+
     return res.status(201).json({
         success: true,
         message: "Auction created successfully",
@@ -85,6 +104,29 @@ export const handleEditAuction = catchErrors(async (req, res) => {
         { new: true }
     );
 
+    updatedAuction.isVerified = false; // after edit, auction need to be verified again
+    await updatedAuction.save();
+
+    // push admin notification
+    const user = await User.findById(userId);
+    await pushAdminNotification({
+        auctionId: auction._id,
+        userId: userId,
+        type: "AUCTION_VERIFICATION",
+        message: `Auction edited by ${user.name} - ${auction.title}`,
+    });
+
+    // logs
+    await createAuctionLog({
+        auctionId: auction._id,
+        userId: userId,
+        userName: user.name,
+        type: "AUCTION_EDITED",
+        details: {
+            auction: auction
+        }
+    }); 
+
     res.status(200).json({ success: true, auction: updatedAuction });
 });
 
@@ -116,6 +158,15 @@ export const handleDeleteAuction = catchErrors(async (req, res) => {
         auctionId,
         { $set: { status: "CANCELLED" } },
     );
+
+    // logs 
+    const user = await User.findById(userId);
+    await createAuctionLog({
+        auctionId: auction._id,
+        userId: userId,
+        userName: user.name,
+        type: "AUCTION_CANCELLED"
+    });
 
     res.status(200).json({ success: true });
 });
@@ -175,13 +226,19 @@ export const handleRegisterInAuction = catchErrors(async (req, res) => {
         auctionId,
         amount: (0.1 * auction.startingPrice), // registration fees is 10% of starting price
         status: "PENDING",
-        type: "REGISTRATION FEES",
+        type: "REGISTRATION_FEES",
     })
     // after successful payment, register user in auction
     auction.registrations.push(user._id);
-    auction.totalParticipants = auction.registrations.length;
     await auction.save();
 
+    // logs
+    await createAuctionLog({
+        auctionId: auction._id,
+        userId: userId,
+        userName: user.name,
+        type: "USER_REGISTRATION",
+    });
 
     return res.json({ success: true, message: "User registered in the auction successfully" });
 });
@@ -215,16 +272,44 @@ export const handlePayment = catchErrors(async (req, res) => {
 
     // payment logic here (integrate with Razorpay or any other payment gateway)
     // payment object for track
+    
+    // after successful payment, update auction
+    auction.finalPrice = auction.currentBid;
+    auction.auctionWinner = auction.currentWinner;
+    auction.currentBid = null;
+    auction.currentWinner = null;
+    auction.status = "COMPLETED";
+    await auction.save();
+
     await Payment.create({
         userId,
         auctionId,
-        amount: auction.currentBid,
+        amount: auction.finalPrice,
         status: "PENDING",
-        type: "WINNING PAYMENT",
+        type: "WINNING_PAYMENT",
     })
-    // after successful payment, update auction status to "COMPLETED"
-    auction.status = "COMPLETED";
-    await auction.save();
+
+    // push admin notification
+    const user = await User.findById(userId);
+    await pushAdminNotification({
+        auctionId: auction._id,
+        userId: userId,
+        type: "PAYMENT_VERIFICATION",
+        message: `Payment made by ${user.name} for auction - ${auction.title}`,
+    });
+
+    // logs
+    await createAuctionLog({
+        auctionId: auction._id,
+        userId: userId,
+        userName: user.name,
+        type: "AUCTION_PAYED",
+        details: {
+            Amount: auction.finalPrice
+        }
+    });
+
+    return res.json({ success: true, message: "Payment successful, auction completed" });
 });
 
 // get list of auctions with status filter

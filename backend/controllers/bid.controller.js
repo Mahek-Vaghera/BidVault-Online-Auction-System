@@ -2,7 +2,9 @@ import { catchErrors } from "../utils/catchErrors.js";
 import AutoBid from "../models/autobid.model.js";
 import Auction from "../models/auction.model.js";
 import Bid from "../models/bid.model.js";
+import User from "../models/user.model.js";
 import { handleAutoBids } from "../services/autobid.service.js";
+import { createAuctionLog } from "../services/log.service.js";
 
 // create a private function to check autobid and user 
 const checkAutobidAndUser = catchErrors(async (autobidId, userId) => {
@@ -64,6 +66,35 @@ export const handlePlaceBid = catchErrors(async (req, res) => {
         });
         await newBid.save();
     }
+
+    // logs
+    const user = await User.findById(userId);
+    await createAuctionLog({
+        auctionId,
+        userId,
+        userName: user.name,
+        type: "BID_PLACED",
+        details: {
+            Amount: bidAmount
+        }
+    });
+
+    // extend auction if bid is placed in last 5 minutes
+    const now = new Date();
+    const auction = await Auction.findById(auctionId);
+
+    const timeDiff = auction.endTime - now;
+    if (timeDiff <= 5 * 60 * 1000) {
+        auction.endTime = new Date(auction.endTime.getTime() + 5 * 60 * 1000);
+        await createAuctionLog({
+            auctionId,
+            userName: "System",
+            type: "AUCTION_EXTENDED",
+            details: { newEndTime: auction.endTime },
+        });
+    }
+
+    return res.status(200).json(`Your bid of amount ${bidAmount} has been placed successfully`);
 });
 
 // set autobid 
@@ -93,6 +124,18 @@ export const handleSetAutobid = catchErrors(async (req, res) => {
     auction.autoBidders.push(userId);
     await auction.save();
 
+    // logs 
+    const user = await User.findById(userId);
+    await createAuctionLog({
+        auctionId,
+        userId,
+        userName: user.name,
+        type: "AUTOBID_SET",
+        details: {
+            MaxLimit: maxLimit
+        }
+    });
+
     handleAutoBids(auctionId);
 
     return res.status(200).json("Your auto-bid has been set successfully");
@@ -112,6 +155,19 @@ export const handleEditAutobid = catchErrors(async (req, res) => {
     // update max limit
     autobid.maxLimit = maxLimit;
     await autobid.save();
+
+    // logs
+    const user = await User.findById(userId);
+    await createAuctionLog({
+        auctionId: autobid.auctionId,
+        userId,
+        userName: user.name,
+        type: "AUTOBID_EDITED",
+        details: {
+            MaxLimit: maxLimit
+        }
+    });
+
     handleAutoBids(autobid.auctionId);
 
     return res.status(200).json("Your auto-bid has been updated successfully");
@@ -131,6 +187,15 @@ export const handleDeactivateAutobid = catchErrors(async (req, res) => {
     autobid.isActive = false;
     await autobid.save();
 
+    // logs
+    const user = await User.findById(userId);
+    await createAuctionLog({
+        auctionId: autobid.auctionId,
+        userId,
+        userName: user.name,
+        type: "AUTOBID_DEACTIVATED"
+    });
+
     return res.status(200).json("Your auto-bid has been deactivated successfully");
 });
 
@@ -147,6 +212,19 @@ export const handleActivateAutobid = catchErrors(async (req, res) => {
     // activate autobid
     autobid.isActive = true;
     await autobid.save();
+ 
+    // logs
+    const user = await User.findById(userId);
+    await createAuctionLog({
+        auctionId: autobid.auctionId,
+        userId,
+        userName: user.name,
+        type: "AUTOBID_ACTIVATED",
+        details: {
+            MaxLimit: autobid.maxLimit
+        }
+    });
+
     handleAutoBids(autobid.auctionId);
 
     return res.status(200).json("Your auto-bid has been activated successfully");

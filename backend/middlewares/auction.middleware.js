@@ -125,6 +125,9 @@ export const validateAuctionEditPayload = catchErrors(async (req, res, next) => 
     if (auction.status === "ENDED") {
         return res.status(400).json({ success: false, message: "Auction has already started. You cannot edit this auction." });
     }
+    if (auction.status === "CANCELLED") {
+        return res.status(400).json({ success: false, message: "Auction has been cancelled. You cannot edit this auction." });
+    }
     
     // allow editing only startTime, endTime, minIncrement, startingPrice, product.description, product.images
     const allowedFields = [

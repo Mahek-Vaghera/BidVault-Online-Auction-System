@@ -89,6 +89,32 @@ export const handleAutoBids = catchErrors(async (auctionId) => {
         auction.totalBids += 1;
         await auction.save();
 
+        // logs for auto-bid triggered
+        await createAuctionLog({
+            auctionId: autobid.auctionId,
+            userId: user._id,
+            userName: user.name,
+            type: "AUTOBID_TRIGGERED",
+            details: {
+                BidAmount: nextBid
+            }
+        });
+
+        // extend auction if bid is placed in last 5 minutes
+    const now = new Date();
+    const auction = await Auction.findById(auctionId);
+
+    const timeDiff = auction.endTime - now;
+    if (timeDiff <= 5 * 60 * 1000) {
+        auction.endTime = new Date(auction.endTime.getTime() + 5 * 60 * 1000);
+        await createAuctionLog({
+            auctionId,
+            userName: "System",
+            type: "AUCTION_EXTENDED",
+            details: { newEndTime: auction.endTime },
+        });
+    }
+
         newBidPlaced = true;
         break; // only one auto-bid triggers at a time
     }

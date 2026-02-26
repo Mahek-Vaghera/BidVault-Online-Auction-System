@@ -81,7 +81,6 @@ const auctionSchema = new mongoose.Schema({
     },
 
     totalBids: { type: Number, default: 0 },
-    totalParticipants: { type: Number, default: 0 },
 }, 
 { 
     timestamps: true 
