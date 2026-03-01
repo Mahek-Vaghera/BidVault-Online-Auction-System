@@ -2,9 +2,9 @@ import express from "express";
 import { restrictToLoggedInUserOnly } from "../middlewares/auth.middleware.js";
 import { validateFields } from "../middlewares/validateFields.middleware.js";
 import { validateBid, validateAutobid } from "../middlewares/bid.middleware.js";
-import { handlePlaceBid, handleSetAutobid, handleEditAutobid, handleDeactivateAutobid, handleActivateAutobid } from "../controllers/bid.controller.js";
+import { handlePlaceBid, handleSetAutobid, handleEditAutobid, handleDeactivateAutobid, handleActivateAutobid, handleGetMyAutobid } from "../controllers/bid.controller.js";
 
-const router = express.Router();
+const router = express.Router({ mergeParams: true });
 
 // place bid
 router.post("/bid", 
@@ -20,6 +20,11 @@ router.post("/autobid",
     validateFields(["maxLimit"]),
     validateAutobid,
     handleSetAutobid
+);
+
+router.get("/autobid/me",
+    restrictToLoggedInUserOnly,
+    handleGetMyAutobid
 );
 
 // edit autobid

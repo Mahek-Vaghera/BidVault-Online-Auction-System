@@ -5,10 +5,11 @@ import Bid from "../models/bid.model.js";
 import User from "../models/user.model.js";
 import { handleAutoBids } from "../services/autobid.service.js";
 import { createAuctionLog } from "../services/log.service.js";
+import { placeBidWithLock, validateBidLogic } from "../services/bidding.service.js";
+import { buildAuctionLeaderboard, getDisplayName } from "../services/leaderboard.service.js";
 
-// create a private function to check autobid and user 
-const checkAutobidAndUser = catchErrors(async (autobidId, userId) => {
-    // find autobid
+// Check autobid and user helper
+const checkAutobidAndUser = async (autobidId, userId, res) => {
     const autobid = await AutoBid.findById(autobidId);
     if (!autobid) {
         return res.status(404).json({
@@ -17,215 +18,298 @@ const checkAutobidAndUser = catchErrors(async (autobidId, userId) => {
         });
     }
 
-    // check if autobid belongs to the user
     if (String(autobid.userId) !== String(userId)) {
         return res.status(403).json({
             success: false,
-            message: "You are not authorized to activate this auto-bid"
+            message: "You are not authorized to modify this auto-bid"
         });
     }
 
     return autobid;
-});
+};
 
-// place bid
-export const handlePlaceBid = catchErrors(async (req, res) => {
-
-    // take data from req
-    const { bidAmount } = req.body;
-    const userId = req.user.id;
-    const { auctionId } = req.params;
-
-    // manual bidding should not allowed if user has active autobid for the auction
-    const autobid = await AutoBid.findOne({ auctionId, user: userId, isActive: true });
-    if (autobid) {
-        return res.status(400).json({
-            success: false,
-            message: "You have an active auto-bid for this auction. Please deactivate it to place a manual bid."
-        });
-    }
-
-    // find bid 
-    const existingBid = await Bid.findOne({ auction: auctionId, user: userId });
-
-    // if bid exists, update it
-    if (existingBid) {
-        // store old bid-amount
-        existingBid.oldBidAmounts.push(existingBid.amount);
-
-        // update
-        existingBid.amount = bidAmount;
-        await existingBid.save();
-    }
-    // if no bid, create new one
-    else {
-        const newBid = new Bid({
-            auction: auctionId,
-            user: userId,
-            amount: bidAmount
-        });
-        await newBid.save();
-    }
-
-    // logs
-    const user = await User.findById(userId);
-    await createAuctionLog({
+const emitLeaderboard = async (io, auctionId) => {
+    if (!io) return;
+    const lb = await buildAuctionLeaderboard(auctionId);
+    io.to(`auction:${auctionId}`).emit("leaderboard-update", {
         auctionId,
-        userId,
-        userName: user.name,
-        type: "BID_PLACED",
-        details: {
-            Amount: bidAmount
+        leaderboard: lb.leaderboard,
+        timestamp: new Date()
+    });
+};
+
+export const handleGetMyAutobid = catchErrors(async (req, res) => {
+    const { auctionId } = req.params;
+    const userId = req.user._id;
+
+    const autobid = await AutoBid.findOne({ auctionId, userId });
+
+    return res.status(200).json({
+        success: true,
+        data: {
+            autobid: autobid || null
         }
     });
-
-    // extend auction if bid is placed in last 5 minutes
-    const now = new Date();
-    const auction = await Auction.findById(auctionId);
-
-    const timeDiff = auction.endTime - now;
-    if (timeDiff <= 5 * 60 * 1000) {
-        auction.endTime = new Date(auction.endTime.getTime() + 5 * 60 * 1000);
-        await createAuctionLog({
-            auctionId,
-            userName: "System",
-            type: "AUCTION_EXTENDED",
-            details: { newEndTime: auction.endTime },
-        });
-    }
-
-    return res.status(200).json(`Your bid of amount ${bidAmount} has been placed successfully`);
 });
 
-// set autobid 
-export const handleSetAutobid = catchErrors(async (req, res) => {
+// Place manual bid with Redis locking
+export const handlePlaceBid = catchErrors(async (req, res) => {
+    const { bidAmount } = req.body;
+    const userId = req.user._id;
+    const { auctionId } = req.params;
+    const io = req.app.locals.io;
 
-    // take data from req
+    try {
+        // Validate bid logic
+        await validateBidLogic(auctionId, userId, bidAmount);
+
+        // Place bid with lock
+        const result = await placeBidWithLock(auctionId, userId, bidAmount, io);
+
+        // Emit real-time bid update
+        if (io) {
+            const user = await User.findById(userId);
+            io.to(`auction:${auctionId}`).emit("bid-update", {
+                auctionId,
+                currentBid: result.auction.currentBid,
+                currentWinner: userId,
+                winnerName: getDisplayName(user),
+                totalBids: result.auction.totalBids,
+                timestamp: new Date()
+            });
+        }
+
+        // After manual bid, trigger auto-bids (other bidders might respond)
+        await handleAutoBids(auctionId, io);
+        await emitLeaderboard(io, auctionId);
+
+        return res.status(200).json({
+            success: true,
+            message: `Your bid of ₹${bidAmount} has been placed successfully`,
+            data: {
+                bidAmount: result.bid.amount,
+                currentBid: result.auction.currentBid,
+                totalBids: result.auction.totalBids
+            }
+        });
+    } catch (error) {
+        return res.status(400).json({
+            success: false,
+            message: error.message || "Failed to place bid"
+        });
+    }
+});
+
+// Set autobid
+export const handleSetAutobid = catchErrors(async (req, res) => {
     const { auctionId } = req.params;
     const { maxLimit } = req.body;
     const userId = req.user._id;
-        
-    // check if autobid already set for this auction by the user
+    const io = req.app.locals.io;
+
+    // Check if autobid already exists
     const existingAutoBid = await AutoBid.findOne({ auctionId, userId });
     if (existingAutoBid) {
         return res.status(400).json({
-        success: false,
-        message: "Auto-bid already set for this auction" });
+            success: false,
+            message: "Auto-bid already set for this auction"
+        });
     }
 
-    await AutoBid.create({
-        auctionId: auctionId,
-        userId: userId,
-        maxLimit: maxLimit,
+    // Create new auto-bid
+    const autobid = await AutoBid.create({
+        auctionId,
+        userId,
+        maxLimit,
+        isActive: true
     });
-    
-    // add user in autobidders list of auction
-    const auction = await Auction.findById(auctionId);
-    auction.autoBidders.push(userId);
-    await auction.save();
 
-    // logs 
+    // Add user to auction's autoBidders list
+    const auction = await Auction.findById(auctionId);
+    if (!auction.autoBidders.includes(userId)) {
+        auction.autoBidders.push(userId);
+        await auction.save();
+    }
+
+    // Create log
     const user = await User.findById(userId);
     await createAuctionLog({
         auctionId,
         userId,
-        userName: user.name,
-        type: "AUTOBID_SET",
-        details: {
-            MaxLimit: maxLimit
-        }
+        userName: getDisplayName(user),
+        type: "AUTO_BID_SET",
+        details: { maxLimit }
     });
 
-    handleAutoBids(auctionId);
+    // Trigger auto-bids
+    await handleAutoBids(auctionId, io);
+    await emitLeaderboard(io, auctionId);
 
-    return res.status(200).json("Your auto-bid has been set successfully");
+    return res.status(200).json({
+        success: true,
+        message: "Auto-bid set successfully",
+        data: { autobid }
+    });
 });
 
-// edit autobid
+// Edit autobid
 export const handleEditAutobid = catchErrors(async (req, res) => {
-
-    // take data from req
+    const { auctionId } = req.params;
     const { autobidId } = req.params;
     const { maxLimit } = req.body;
     const userId = req.user._id;
+    const io = req.app.locals.io;
 
-    // check autobid and user
-    const autobid = checkAutobidAndUser(autobidId, userId);
+    // Check autobid ownership
+    const autobid = await AutoBid.findById(autobidId);
+    if (!autobid) {
+        return res.status(404).json({
+            success: false,
+            message: "Auto-bid not found"
+        });
+    }
 
-    // update max limit
+    if (String(autobid.userId) !== String(userId)) {
+        return res.status(403).json({
+            success: false,
+            message: "You are not authorized to modify this auto-bid"
+        });
+    }
+
+    if (String(autobid.auctionId) !== String(auctionId)) {
+        return res.status(400).json({
+            success: false,
+            message: "Auto-bid does not belong to this auction"
+        });
+    }
+
+    // Update max limit
     autobid.maxLimit = maxLimit;
     await autobid.save();
 
-    // logs
+    // Create log
     const user = await User.findById(userId);
     await createAuctionLog({
         auctionId: autobid.auctionId,
         userId,
-        userName: user.name,
-        type: "AUTOBID_EDITED",
-        details: {
-            MaxLimit: maxLimit
-        }
+        userName: getDisplayName(user),
+        type: "AUTO_BID_EDITED",
+        details: { maxLimit }
     });
 
-    handleAutoBids(autobid.auctionId);
+    // Trigger auto-bids
+    await handleAutoBids(autobid.auctionId, io);
+    await emitLeaderboard(io, autobid.auctionId);
 
-    return res.status(200).json("Your auto-bid has been updated successfully");
+    return res.status(200).json({
+        success: true,
+        message: "Auto-bid updated successfully",
+        data: { autobid }
+    });
 });
 
-// deactivate autobid
+// Deactivate autobid
 export const handleDeactivateAutobid = catchErrors(async (req, res) => {
-    
-    // take data from req
+    const { auctionId } = req.params;
     const { autobidId } = req.params;
     const userId = req.user._id;
 
-    // check autobid and user
-    const autobid = checkAutobidAndUser(autobidId, userId);;
+    // Check autobid ownership
+    const autobid = await AutoBid.findById(autobidId);
+    if (!autobid) {
+        return res.status(404).json({
+            success: false,
+            message: "Auto-bid not found"
+        });
+    }
 
-    // deactivate autobid
+    if (String(autobid.userId) !== String(userId)) {
+        return res.status(403).json({
+            success: false,
+            message: "You are not authorized to modify this auto-bid"
+        });
+    }
+
+    if (String(autobid.auctionId) !== String(auctionId)) {
+        return res.status(400).json({
+            success: false,
+            message: "Auto-bid does not belong to this auction"
+        });
+    }
+
+    // Deactivate
     autobid.isActive = false;
     await autobid.save();
 
-    // logs
+    // Create log
     const user = await User.findById(userId);
     await createAuctionLog({
         auctionId: autobid.auctionId,
         userId,
-        userName: user.name,
-        type: "AUTOBID_DEACTIVATED"
+        userName: getDisplayName(user),
+        type: "AUTO_BID_DEACTIVATED"
     });
 
-    return res.status(200).json("Your auto-bid has been deactivated successfully");
+    await emitLeaderboard(req.app.locals.io, autobid.auctionId);
+
+    return res.status(200).json({
+        success: true,
+        message: "Auto-bid deactivated successfully",
+        data: { autobid }
+    });
 });
 
-//activate autobid
+// Activate autobid
 export const handleActivateAutobid = catchErrors(async (req, res) => {
-
-    // take data from req
+    const { auctionId } = req.params;
     const { autobidId } = req.params;
     const userId = req.user._id;
+    const io = req.app.locals.io;
 
-    // check autobid and user
-    const autobid = checkAutobidAndUser(autobidId, userId);;
+    // Check autobid ownership
+    const autobid = await AutoBid.findById(autobidId);
+    if (!autobid) {
+        return res.status(404).json({
+            success: false,
+            message: "Auto-bid not found"
+        });
+    }
 
-    // activate autobid
+    if (String(autobid.userId) !== String(userId)) {
+        return res.status(403).json({
+            success: false,
+            message: "You are not authorized to modify this auto-bid"
+        });
+    }
+
+    if (String(autobid.auctionId) !== String(auctionId)) {
+        return res.status(400).json({
+            success: false,
+            message: "Auto-bid does not belong to this auction"
+        });
+    }
+
+    // Activate
     autobid.isActive = true;
     await autobid.save();
- 
-    // logs
+
+    // Create log
     const user = await User.findById(userId);
     await createAuctionLog({
         auctionId: autobid.auctionId,
         userId,
-        userName: user.name,
-        type: "AUTOBID_ACTIVATED",
-        details: {
-            MaxLimit: autobid.maxLimit
-        }
+        userName: getDisplayName(user),
+        type: "AUTO_BID_ACTIVATED",
+        details: { maxLimit: autobid.maxLimit }
     });
 
-    handleAutoBids(autobid.auctionId);
+    // Trigger auto-bids
+    await handleAutoBids(autobid.auctionId, io);
+    await emitLeaderboard(io, autobid.auctionId);
 
-    return res.status(200).json("Your auto-bid has been activated successfully");
+    return res.status(200).json({
+        success: true,
+        message: "Auto-bid activated successfully",
+        data: { autobid }
+    });
 });

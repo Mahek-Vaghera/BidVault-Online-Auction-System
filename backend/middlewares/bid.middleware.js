@@ -27,8 +27,11 @@ export const validateBid = catchErrors(async (req, res, next) => {
     if (typeof bidAmount !== "number" || isNaN(bidAmount) || bidAmount <= 0) {
         return res.status(400).json({ success: false, message: "Bid amount must be a positive number" });
     }
-    if (bidAmount < auction.startingPrice || (auction.currentBid > 0 && bidAmount < auction.currentBid + auction.minIncrement)) {
-        return res.status(400).json({ success: false, message: `Bid amount must be at least the starting price of ${auction.startingPrice} or the minimum increment above the current bid` });
+    const minRequired = auction.currentBid > 0
+        ? auction.currentBid + auction.minIncrement
+        : auction.startingPrice;
+    if (bidAmount < minRequired) {
+        return res.status(400).json({ success: false, message: `Bid amount must be at least ₹${minRequired}` });
     }
 
     next();
@@ -59,7 +62,12 @@ export const validateAutobid = catchErrors(async (req, res, next) => {
     if (typeof maxLimit !== "number" || isNaN(maxLimit) || maxLimit <= 0) {
         return res.status(400).json({ success: false, message: "Max limit must be a positive number" });
     }
-    if (maxLimit < auction.startingPrice || (auction.currentBid > 0 && maxLimit < auction.currentBid + auction.minIncrement)) {
-        return res.status(400).json({ success: false, message: `Max limit must be at least the starting price of ${auction.startingPrice} or the minimum increment above the current bid` });
+    const minRequired = auction.currentBid > 0
+        ? auction.currentBid + auction.minIncrement
+        : auction.startingPrice;
+    if (maxLimit < minRequired) {
+        return res.status(400).json({ success: false, message: `Max limit must be at least ₹${minRequired}` });
     }
+
+    next();
 });
