@@ -4,7 +4,13 @@ import {
     handleDeleteAuction,
     handleEditAuction,
     handleRegisterInAuction,
+    handleVerifyRegistrationPayment,
     handlePayment,
+    handleVerifyWinningPayment,
+    handleBuyNow,
+    handleVerifyBuyNowPayment,
+    toggleSaveAuction,
+    handleGetMyDeliveryForAuction,
     listAuctions,
     getAuction
 } from "../controllers/auction.controller.js";
@@ -53,10 +59,40 @@ router.post("/:auctionId/register",
     handleRegisterInAuction
 );
 
-// when auction ends, winner need to pay pay the amount
+router.post("/:auctionId/verify-registration-payment",
+    restrictToLoggedInUserOnly,
+    handleVerifyRegistrationPayment
+);
+
+// when auction ends, winner need to pay the amount
 router.post("/:auctionId/pay",
     restrictToLoggedInUserOnly,
     handlePayment
+);
+
+router.post("/:auctionId/verify-winning-payment",
+    restrictToLoggedInUserOnly,
+    handleVerifyWinningPayment
+);
+
+router.post("/:auctionId/buy-now",
+    restrictToLoggedInUserOnly,
+    handleBuyNow
+);
+
+router.post("/:auctionId/verify-buy-now-payment",
+    restrictToLoggedInUserOnly,
+    handleVerifyBuyNowPayment
+);
+
+router.post("/:auctionId/save",
+    restrictToLoggedInUserOnly,
+    toggleSaveAuction
+);
+
+router.get("/:auctionId/delivery",
+    restrictToLoggedInUserOnly,
+    handleGetMyDeliveryForAuction
 );
 
 // get list of auctions with status filter

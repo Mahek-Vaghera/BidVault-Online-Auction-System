@@ -19,7 +19,7 @@ const auctionSchema = new mongoose.Schema({
     },
     status: {
         type: String, 
-        enum: ["UPCOMING", "LIVE", "ENDED", "CANCELLED"],
+        enum: ["UPCOMING", "LIVE","COMPLETED", "ENDED", "CANCELLED"],
         default: "UPCOMING",
     },
     isVerified: {
