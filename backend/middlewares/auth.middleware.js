@@ -38,3 +38,28 @@ export const checkAuth = catchErrors((req, res, next) => {
     req.user = user || null;
     next();
 });
+
+export const restrictToAdminOnly = catchErrors((req, res, next) => {
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : req.cookies?.adminToken;
+
+    if (!token) {
+        return res.status(401).json({ success: false, message: "Admin authentication required" });
+    }
+
+    let user;
+    try {
+        user = getUser(token);
+    } catch (error) {
+        return res.status(401).json({ success: false, message: "Invalid or expired admin token" });
+    }
+
+    if (!user || user.email !== process.env.ADMIN_EMAIL) {
+        return res.status(403).json({ success: false, message: "Admin access denied" });
+    }
+
+    req.admin = user;
+    next();
+});

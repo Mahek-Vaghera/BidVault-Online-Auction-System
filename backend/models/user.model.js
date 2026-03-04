@@ -32,6 +32,21 @@ const userSchema = new mongoose.Schema({
       type: Date,
       default: null,
     }, 
+        address: {
+            line1: { type: String, default: "" },
+            line2: { type: String, default: "" },
+            city: { type: String, default: "" },
+            state: { type: String, default: "" },
+            pincode: { type: String, default: "" },
+            country: { type: String, default: "India" },
+            phone: { type: String, default: "" },
+        },
+        savedAuctions: [
+            {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "auction",
+            },
+        ],
 },
 {
     timestamps: true

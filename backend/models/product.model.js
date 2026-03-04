@@ -1,26 +1,36 @@
 import mongoose from 'mongoose';
 
-const productSchema = new mongoose.Schema({
+const PaymentSchema = new mongoose.Schema({
     
-    name: { 
-        type: String, 
+    userId: { 
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'user'
+    },
+    auctionId: { 
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'auction'
+    },
+    amount: { 
+        type: Number, 
         required: true 
     },
-    category: { 
+    status: { 
         type: String, 
+        enum: ['PENDING', 'SUCCESS', 'PAID', 'FAILED'], 
         required: true
     },
-    condition: { 
-        type: String, 
-        enum: ["new", "like new", "good", "fair"],
-        required: true
+    type: {
+        type: String,
+        enum: ['REGISTRATION_FEES', 'WINNING_PAYMENT', 'BUY_IT_NOW_PAYMENT']
     },
-    description: { 
-        type: String 
+    metadata: { 
+        type: Object 
     },
-    images: [{ type: String }]  
+},
+{ 
+    timestamps: true 
 });
 
-const Product = mongoose.model("product", productSchema);
+const Payment = mongoose.model('Payment', PaymentSchema);
 
-export default Product;
+export default Payment;
