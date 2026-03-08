@@ -1,0 +1,137 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #f9fafb;
+  color: #111827;
+  line-height: 1.5;
+}
+
+/* Custom utilities */
+@layer components {
+  .btn-primary {
+    @apply px-4 py-2 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 bg-gray-200 text-gray-800 rounded-lg font-semibold hover:bg-gray-300 transition-colors;
+  }
+
+  .btn-accent {
+    @apply px-4 py-2 bg-accent-500 text-white rounded-lg font-semibold hover:bg-accent-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-danger {
+    @apply px-4 py-2 bg-danger-500 text-white rounded-lg font-semibold hover:bg-danger-600 transition-colors;
+  }
+
+  .card {
+    @apply bg-white rounded-lg shadow-md p-6 hover:shadow-lg transition-shadow;
+  }
+
+  .badge {
+    @apply inline-block px-3 py-1 rounded-full text-sm font-semibold;
+  }
+
+  .badge-success {
+    @apply bg-success-50 text-success-600;
+  }
+
+  .badge-warning {
+    @apply bg-accent-50 text-accent-600;
+  }
+
+  .badge-danger {
+    @apply bg-danger-50 text-danger-600;
+  }
+
+  .input-field {
+    @apply w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent;
+  }
+}
+
+/* Animations */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slideIn 0.3s ease-out;
+}
+
+@keyframes leaderboardRowEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes leaderboardRowUp {
+  0% {
+    background-color: rgba(34, 197, 94, 0.1);
+    transform: translateY(10px);
+  }
+  100% {
+    background-color: transparent;
+    transform: translateY(0);
+  }
+}
+
+@keyframes leaderboardRowDown {
+  0% {
+    background-color: rgba(239, 68, 68, 0.08);
+    transform: translateY(-10px);
+  }
+  100% {
+    background-color: transparent;
+    transform: translateY(0);
+  }
+}
+
+@keyframes leaderboardAmountBump {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.leaderboard-row-enter {
+  animation: leaderboardRowEnter 0.35s ease-out;
+}
+
+.leaderboard-row-up {
+  animation: leaderboardRowUp 0.75s ease;
+}
+
+.leaderboard-row-down {
+  animation: leaderboardRowDown 0.75s ease;
+}
+
+.leaderboard-amount-bump {
+  display: inline-block;
+  animation: leaderboardAmountBump 0.55s ease;
+}
