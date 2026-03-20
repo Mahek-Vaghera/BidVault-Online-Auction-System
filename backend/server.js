@@ -41,11 +41,21 @@ if (hasTcpRedisConfig) {
 }
 
 const httpServer = createServer(app);
+const allowedOrigins = [
+  process.env.FRONTEND_URL,
+  "http://localhost:3000",
+  "http://localhost:5173",
+].filter(Boolean);
+
 const ioConfig = {
   cors: {
-    origin: ["http://localhost:3000", "http://localhost:5173"],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error("CORS origin not allowed"));
+    },
     methods: ["GET", "POST"],
-    credentials: true
+    credentials: true,
   },
 };
 
@@ -81,8 +91,12 @@ app.use(express.urlencoded({ extended: true }));
 app.use(express.json());       
 app.use(cookieParser());
 app.use(cors({
-  origin: ["http://localhost:3000", "http://localhost:5173"],
-  credentials: true
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('CORS origin not allowed'));
+  },
+  credentials: true,
 })); 
 
 // home page
@@ -91,22 +105,28 @@ app.get("/", (req, res) => res.send("BidVault Online Auction System") );
 // auth routes
 import authRoutes from "./routes/auth.routes.js";
 app.use("/bidvault/auth", authRoutes);
+// Alias routes without the `/bidvault` prefix for compatibility with deployed frontend
+app.use("/auth", authRoutes);
 
 // admin routes
 import adminRoutes from "./routes/admin.routes.js";
 app.use("/bidvault/admin", adminRoutes);
+app.use("/admin", adminRoutes);
 
 // auction routes
 import auctionRoutes from "./routes/auction.routes.js";
 app.use("/bidvault/auctions", auctionRoutes);
+app.use("/auctions", auctionRoutes);
 
 // bid routes
 import bidRoutes from "./routes/bid.routes.js";
 app.use("/bidvault/auctions/:auctionId", bidRoutes);
+app.use("/auctions/:auctionId", bidRoutes);
 
 // leaderboard routes
 import leaderboardRoutes from "./routes/leaderboard.routes.js";
 app.use("/bidvault/auctions", leaderboardRoutes);
+app.use("/auctions", leaderboardRoutes);
 
 // error handling middleware
 app.use(errorHandler);   
