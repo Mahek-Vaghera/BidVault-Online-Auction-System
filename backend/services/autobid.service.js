@@ -6,6 +6,7 @@ import { SendOutBidEmail } from "./mail_service/email.sender.js";
 import { createAuctionLog } from "./log.service.js";
 import { buildAuctionLeaderboard, getDisplayName } from "./leaderboard.service.js";
 import { acquireDistributedLock, releaseDistributedLock } from "./redis.service.js";
+import { invalidateAuctionMutationCaches } from "./cache-invalidation.service.js";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -42,6 +43,7 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
 
       for (const autobid of autoBidders) {
         const bidderId = autobid.userId;
+        const previousWinnerId = auction.currentWinner;
         // Skip if this bidder already has the highest bid.
         if (String(bidderId) === String(auction.currentWinner)) continue;
 
@@ -148,6 +150,14 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
             timestamp: new Date()
           });
         }
+
+        await invalidateAuctionMutationCaches({
+          auctionId,
+          previousStatus: "LIVE",
+          nextStatus: auction.status,
+          creatorId: auction.createdBy,
+          affectedUserIds: [bidderId, previousWinnerId],
+        });
 
         bidPlacedThisCycle = true;
         break; // Only one auto-bid step per cycle.

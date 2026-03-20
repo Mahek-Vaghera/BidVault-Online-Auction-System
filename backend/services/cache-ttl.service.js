@@ -1,0 +1,40 @@
+export const CACHE_TTL_SECONDS = {
+  CACHE_DEFAULT_JSON: 600,
+
+  AUCTIONS_LIST_ALL: 600,
+  AUCTIONS_LIST_UPCOMING: 600,
+  AUCTIONS_LIST_LIVE: 600,
+  AUCTIONS_LIST_COMPLETED: 600,
+  AUCTIONS_LIST_CANCELLED: 600,
+
+  ADMIN_OVERVIEW: 300,
+  ADMIN_AUCTIONS_PENDING: 300,
+  ADMIN_AUCTIONS_LIVE: 300,
+  ADMIN_DELIVERIES_ALL: 300,
+  ADMIN_PAYMENTS_ALL: 300,
+
+  PROFILE_RECENT_ACTIVITIES: 600,
+  PROFILE_MY_AUCTIONS: 600,
+  PROFILE_SAVED_AUCTIONS: 600,
+  PROFILE_WINNING_AUCTIONS: 600,
+  PROFILE_STATS: 600,
+};
+
+export const getAuctionListCacheTtlSeconds = (statusKey = "ALL") => {
+  const normalizedStatus = String(statusKey || "ALL").toUpperCase();
+
+  if (normalizedStatus === "UPCOMING") {
+    return CACHE_TTL_SECONDS.AUCTIONS_LIST_UPCOMING;
+  }
+  if (normalizedStatus === "LIVE") {
+    return CACHE_TTL_SECONDS.AUCTIONS_LIST_LIVE;
+  }
+  if (normalizedStatus === "COMPLETED" || normalizedStatus === "ENDED") {
+    return CACHE_TTL_SECONDS.AUCTIONS_LIST_COMPLETED;
+  }
+  if (normalizedStatus === "CANCELLED") {
+    return CACHE_TTL_SECONDS.AUCTIONS_LIST_CANCELLED;
+  }
+
+  return CACHE_TTL_SECONDS.AUCTIONS_LIST_ALL;
+};

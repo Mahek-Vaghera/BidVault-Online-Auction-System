@@ -10,6 +10,23 @@ import { setUser } from "../services/auth.service.js";
 import { SendVerificationCode, SendResetPwdEmail, WelcomeEmail } from "../services/mail_service/email.sender.js";
 import { catchErrors } from "../utils/catchErrors.js";
 import { cacheGetJson, cacheSetJson } from "../services/cache.service.js";
+import { CACHE_TTL_SECONDS } from "../services/cache-ttl.service.js";
+import {
+  buildProfileMyAuctionsCacheKey,
+  buildProfileRecentActivitiesCacheKey,
+  buildProfileSavedAuctionsCacheKey,
+  buildProfileStatsCacheKey,
+  buildProfileWinningAuctionsCacheKey,
+  invalidateProfileCachesForUser,
+} from "../services/cache-invalidation.service.js";
+
+const isProduction = process.env.NODE_ENV === "production";
+const authCookieOptions = {
+  httpOnly: true,
+  secure: isProduction,
+  sameSite: isProduction ? "none" : "lax",
+  maxAge: 7 * 24 * 60 * 60 * 1000,
+};
 
 // register user
 export const handleRegister = catchErrors(async (req, res) => {
@@ -81,7 +98,7 @@ export const verifyEmail = catchErrors(async (req, res)=> {
 
     // generate token and set cookie
     const token = setUser(user);
-    res.cookie("token", token);
+    res.cookie("token", token, authCookieOptions);
 
     return res.status(200).json({
       success: true,
@@ -120,7 +137,7 @@ export const handleLogin = catchErrors(async (req, res) => {
 
     // generate token and set cookie
     const token = setUser(user);
-    res.cookie("token", token);
+    res.cookie("token", token, authCookieOptions);
   
     return res.json({
       success: true,
@@ -161,7 +178,11 @@ export const handleLogin = catchErrors(async (req, res) => {
 export const handleLogout = catchErrors(async (req, res) => {
   
     // clear cookie
-    res.clearCookie("token");
+    res.clearCookie("token", {
+      httpOnly: true,
+      secure: authCookieOptions.secure,
+      sameSite: authCookieOptions.sameSite,
+    });
 
     return res.json({ success: true, message: "Logged out" });
 }); 
@@ -208,6 +229,11 @@ export const handleGetMe = catchErrors(async (req, res) => {
 // get public profile with stats for any user
 export const handleGetPublicProfile = catchErrors(async (req, res) => {
   const { userId } = req.params;
+  const cacheKey = buildProfileStatsCacheKey(userId);
+  const cached = await cacheGetJson(cacheKey);
+  if (cached) {
+    return res.status(200).json(cached);
+  }
 
   const user = await User.findById(userId).select("username fullname email createdAt isVerified");
   if (!user) {
@@ -221,7 +247,7 @@ export const handleGetPublicProfile = catchErrors(async (req, res) => {
     Bid.countDocuments({ userId }),
   ]);
 
-  return res.status(200).json({
+  const response = {
     success: true,
     profile: user,
     stats: {
@@ -230,7 +256,10 @@ export const handleGetPublicProfile = catchErrors(async (req, res) => {
       completedAuctions,
       totalBids,
     },
-  });
+  };
+
+  await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.PROFILE_STATS);
+  return res.status(200).json(response);
 });
 
 // get logged-in user's combined recent activity (auctions + bids)
@@ -238,6 +267,11 @@ export const handleGetMyActivity = catchErrors(async (req, res) => {
   const userId = req.user._id;
   const limit = Math.max(1, Math.min(50, Number(req.query.limit) || 10));
   const skip = Math.max(0, Number(req.query.skip) || 0);
+  const cacheKey = buildProfileRecentActivitiesCacheKey(userId, skip, limit);
+  const cached = await cacheGetJson(cacheKey);
+  if (cached) {
+    return res.status(200).json(cached);
+  }
 
   const [myAuctions, myBids, myWinningPayments] = await Promise.all([
     Auction.find({ createdBy: userId })
@@ -296,18 +330,21 @@ export const handleGetMyActivity = catchErrors(async (req, res) => {
 
   const paged = combined.slice(skip, skip + limit);
 
-  return res.status(200).json({
+  const response = {
     success: true,
     items: paged,
     total: combined.length,
     hasMore: skip + limit < combined.length,
     nextSkip: skip + limit,
-  });
+  };
+
+  await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.PROFILE_RECENT_ACTIVITIES);
+  return res.status(200).json(response);
 });
 
 export const handleGetMyAuctions = catchErrors(async (req, res) => {
   const userId = req.user._id;
-  const cacheKey = `cache:my-auctions:${userId}`;
+  const cacheKey = buildProfileMyAuctionsCacheKey(userId);
   const cached = await cacheGetJson(cacheKey);
   if (cached) {
     return res.status(200).json(cached);
@@ -373,7 +410,7 @@ export const handleGetMyAuctions = catchErrors(async (req, res) => {
     total: items.length,
   };
 
-  await cacheSetJson(cacheKey, response, 45);
+  await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.PROFILE_MY_AUCTIONS);
   return res.status(200).json(response);
 });
 
@@ -446,10 +483,19 @@ export const handleUpdateAddress = catchErrors(async (req, res) => {
     { new: true }
   ).select("username fullname email address");
 
+  await invalidateProfileCachesForUser(userId);
+
   return res.status(200).json({ success: true, message: "Address updated", user });
 });
 
 export const handleGetSavedAuctions = catchErrors(async (req, res) => {
+  const userId = req.user._id;
+  const cacheKey = buildProfileSavedAuctionsCacheKey(userId);
+  const cached = await cacheGetJson(cacheKey);
+  if (cached) {
+    return res.status(200).json(cached);
+  }
+
   const user = await User.findById(req.user._id).populate({
     path: "savedAuctions",
     populate: [
@@ -460,15 +506,23 @@ export const handleGetSavedAuctions = catchErrors(async (req, res) => {
 
   const auctions = (user?.savedAuctions || []).filter((auction) => Boolean(auction && auction.isVerified));
 
-  return res.status(200).json({
+  const response = {
     success: true,
     auctions,
     total: auctions.length,
-  });
+  };
+
+  await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.PROFILE_SAVED_AUCTIONS);
+  return res.status(200).json(response);
 });
 
 export const handleGetMyWinningAuctions = catchErrors(async (req, res) => {
   const userId = req.user._id;
+  const cacheKey = buildProfileWinningAuctionsCacheKey(userId);
+  const cached = await cacheGetJson(cacheKey);
+  if (cached) {
+    return res.status(200).json(cached);
+  }
 
   const winningAuctions = await Auction.find({
     status: { $in: ["COMPLETED", "ENDED"] },
@@ -524,9 +578,12 @@ export const handleGetMyWinningAuctions = catchErrors(async (req, res) => {
     };
   });
 
-  return res.status(200).json({
+  const response = {
     success: true,
     items,
     total: items.length,
-  });
+  };
+
+  await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.PROFILE_WINNING_AUCTIONS);
+  return res.status(200).json(response);
 });

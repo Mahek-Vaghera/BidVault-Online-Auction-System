@@ -4,20 +4,8 @@ import User from "../models/user.model.js";
 import { createAuctionLog } from "./log.service.js";
 import { getDisplayName } from "./leaderboard.service.js";
 import { handleAutoBids } from "./autobid.service.js";
-import { cacheDeleteByPrefix } from "./cache.service.js";
+import { invalidateAuctionMutationCaches } from "./cache-invalidation.service.js";
 // import { SendAuctionEndedEmail } from "./mail_service/email.sender.js";
-
-const invalidateAuctionCaches = async (auctionId) => {
-  await Promise.all([
-    cacheDeleteByPrefix("cache:auctions:list:"),
-    cacheDeleteByPrefix("cache:my-auctions:"),
-    cacheDeleteByPrefix("cache:admin:overview"),
-    cacheDeleteByPrefix("cache:admin:auctions:"),
-    cacheDeleteByPrefix("cache:admin:payments"),
-    cacheDeleteByPrefix("cache:admin:deliveries"),
-    cacheDeleteByPrefix(`cache:auction:${auctionId}:`),
-  ]);
-};
 
 export const startAuctionCompletionJob = (io) => {
   // Run every minute to check for ended auctions
@@ -36,7 +24,12 @@ export const startAuctionCompletionJob = (io) => {
       for (const auction of toLive) {
         auction.status = "LIVE";
         await auction.save();
-        await invalidateAuctionCaches(auction._id);
+        await invalidateAuctionMutationCaches({
+          auctionId: auction._id,
+          previousStatus: "UPCOMING",
+          nextStatus: "LIVE",
+          creatorId: auction.createdBy,
+        });
 
         await createAuctionLog({
           auctionId: auction._id,
@@ -70,7 +63,13 @@ export const startAuctionCompletionJob = (io) => {
       for (const auction of toCancel) {
         auction.status = "CANCELLED";
         await auction.save();
-        await invalidateAuctionCaches(auction._id);
+        await invalidateAuctionMutationCaches({
+          auctionId: auction._id,
+          previousStatus: "UPCOMING",
+          nextStatus: "CANCELLED",
+          creatorId: auction.createdBy,
+          clearSavedAuctions: true,
+        });
 
         await createAuctionLog({
           auctionId: auction._id,
@@ -101,7 +100,14 @@ export const startAuctionCompletionJob = (io) => {
 
           // Save auction
           await auction.save();
-          await invalidateAuctionCaches(auction._id);
+          await invalidateAuctionMutationCaches({
+            auctionId: auction._id,
+            previousStatus: "LIVE",
+            nextStatus: "COMPLETED",
+            creatorId: auction.createdBy,
+            affectedUserIds: [auction.currentWinner],
+            clearSavedAuctions: true,
+          });
 
           // Create log
           await createAuctionLog({
@@ -143,7 +149,13 @@ export const startAuctionCompletionJob = (io) => {
           // No bids placed after going live: cancel the auction.
           auction.status = "CANCELLED";
           await auction.save();
-          await invalidateAuctionCaches(auction._id);
+          await invalidateAuctionMutationCaches({
+            auctionId: auction._id,
+            previousStatus: "LIVE",
+            nextStatus: "CANCELLED",
+            creatorId: auction.createdBy,
+            clearSavedAuctions: true,
+          });
 
           // Create log
           await createAuctionLog({
@@ -160,7 +172,6 @@ export const startAuctionCompletionJob = (io) => {
           const seller = await User.findById(auction.createdBy);
           try {
             // Send email to seller about no bids
-            // You can implement this method in email.sender.js
           } catch (emailErr) {
             console.error("Error sending seller notification:", emailErr);
           }

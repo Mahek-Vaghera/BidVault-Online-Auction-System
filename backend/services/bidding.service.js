@@ -6,6 +6,7 @@ import { createAuctionLog } from "./log.service.js";
 import { SendOutBidEmail } from "./mail_service/email.sender.js";
 import { getDisplayName } from "./leaderboard.service.js";
 import { acquireDistributedLock, releaseDistributedLock } from "./redis.service.js";
+import { invalidateAuctionMutationCaches } from "./cache-invalidation.service.js";
 
 export const placeBidWithLock = async (
   auctionId,
@@ -25,6 +26,8 @@ export const placeBidWithLock = async (
     if (!auction || auction.status !== "LIVE") {
       throw new Error("Auction is not active");
     }
+
+    const previousWinnerId = auction.currentWinner;
 
     // Verify bid amount
     const minBidRequired = auction.currentBid > 0
@@ -116,6 +119,14 @@ export const placeBidWithLock = async (
         });
       }
     }
+
+    await invalidateAuctionMutationCaches({
+      auctionId,
+      previousStatus: "LIVE",
+      nextStatus: auction.status,
+      creatorId: auction.createdBy,
+      affectedUserIds: [userId, previousWinnerId],
+    });
 
     // Release lock
     await releaseDistributedLock(lock);

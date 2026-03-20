@@ -1,4 +1,5 @@
 import { redisDel, redisGet, redisScan, redisSetEx } from "./redis.service.js";
+import { CACHE_TTL_SECONDS } from "./cache-ttl.service.js";
 
 export const cacheGetJson = async (key) => {
   try {
@@ -10,7 +11,11 @@ export const cacheGetJson = async (key) => {
   }
 };
 
-export const cacheSetJson = async (key, value, ttlSeconds = 60) => {
+export const cacheSetJson = async (
+  key,
+  value,
+  ttlSeconds = CACHE_TTL_SECONDS.CACHE_DEFAULT_JSON
+) => {
   try {
     await redisSetEx(key, JSON.stringify(value), ttlSeconds);
   } catch (error) {

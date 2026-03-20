@@ -7,6 +7,7 @@ import { handleAutoBids } from "../services/autobid.service.js";
 import { createAuctionLog } from "../services/log.service.js";
 import { placeBidWithLock, validateBidLogic } from "../services/bidding.service.js";
 import { buildAuctionLeaderboard, getDisplayName } from "../services/leaderboard.service.js";
+import { invalidateAuctionMutationCaches } from "../services/cache-invalidation.service.js";
 
 // Check autobid and user helper
 const checkAutobidAndUser = async (autobidId, userId, res) => {
@@ -131,6 +132,14 @@ export const handleSetAutobid = catchErrors(async (req, res) => {
         await auction.save();
     }
 
+    await invalidateAuctionMutationCaches({
+        auctionId,
+        previousStatus: auction.status,
+        nextStatus: auction.status,
+        creatorId: auction.createdBy,
+        affectedUserIds: [userId],
+    });
+
     // Create log
     const user = await User.findById(userId);
     await createAuctionLog({
@@ -187,6 +196,15 @@ export const handleEditAutobid = catchErrors(async (req, res) => {
     autobid.maxLimit = maxLimit;
     await autobid.save();
 
+    const auction = await Auction.findById(autobid.auctionId).select("createdBy status");
+    await invalidateAuctionMutationCaches({
+        auctionId: autobid.auctionId,
+        previousStatus: auction?.status,
+        nextStatus: auction?.status,
+        creatorId: auction?.createdBy,
+        affectedUserIds: [userId],
+    });
+
     // Create log
     const user = await User.findById(userId);
     await createAuctionLog({
@@ -241,6 +259,15 @@ export const handleDeactivateAutobid = catchErrors(async (req, res) => {
     autobid.isActive = false;
     await autobid.save();
 
+    const auction = await Auction.findById(autobid.auctionId).select("createdBy status");
+    await invalidateAuctionMutationCaches({
+        auctionId: autobid.auctionId,
+        previousStatus: auction?.status,
+        nextStatus: auction?.status,
+        creatorId: auction?.createdBy,
+        affectedUserIds: [userId],
+    });
+
     // Create log
     const user = await User.findById(userId);
     await createAuctionLog({
@@ -292,6 +319,15 @@ export const handleActivateAutobid = catchErrors(async (req, res) => {
     // Activate
     autobid.isActive = true;
     await autobid.save();
+
+    const auction = await Auction.findById(autobid.auctionId).select("createdBy status");
+    await invalidateAuctionMutationCaches({
+        auctionId: autobid.auctionId,
+        previousStatus: auction?.status,
+        nextStatus: auction?.status,
+        creatorId: auction?.createdBy,
+        affectedUserIds: [userId],
+    });
 
     // Create log
     const user = await User.findById(userId);

@@ -5,6 +5,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000/bidvault'
 const api = axios.create({
   baseURL: API_URL,
   withCredentials: true,
+  timeout: 15000,
 })
 
 // Auth APIs
@@ -62,6 +63,7 @@ export const leaderboardAPI = {
 const adminApi = axios.create({
   baseURL: API_URL,
   withCredentials: true,
+  timeout: 15000,
 })
 
 const adminHeaders = () => ({

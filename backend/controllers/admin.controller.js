@@ -4,18 +4,13 @@ import Auction from "../models/auction.model.js";
 import Payment from "../models/payment.model.js";
 import Delivery from "../models/delivery.model.js";
 import AdminNotification from "../models/admin.notify.model.js";
-import { cacheDeleteByPrefix, cacheGetJson, cacheSetJson } from "../services/cache.service.js";
-
-const invalidateAdminCaches = async () => {
-    await Promise.all([
-        cacheDeleteByPrefix("cache:admin:overview"),
-        cacheDeleteByPrefix("cache:admin:auctions:"),
-        cacheDeleteByPrefix("cache:admin:payments"),
-        cacheDeleteByPrefix("cache:admin:deliveries"),
-        cacheDeleteByPrefix("cache:auctions:list:"),
-        cacheDeleteByPrefix("cache:my-auctions:"),
-    ]);
-};
+import { cacheGetJson, cacheSetJson } from "../services/cache.service.js";
+import { CACHE_TTL_SECONDS } from "../services/cache-ttl.service.js";
+import {
+    invalidateAdminCacheGroups,
+    invalidateAuctionMutationCaches,
+    invalidateProfileCachesForUser,
+} from "../services/cache-invalidation.service.js";
 
 // login admin
 export const handleLogin = catchErrors(async (req, res) => {
@@ -83,7 +78,7 @@ export const getAdminOverview = catchErrors(async (req, res) => {
         },
     };
 
-    await cacheSetJson(cacheKey, response, 30);
+    await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.ADMIN_OVERVIEW);
     return res.status(200).json(response);
 });
 
@@ -108,7 +103,7 @@ export const getPendingAuctions = catchErrors(async (req, res) => {
         total: auctions.length,
     };
 
-    await cacheSetJson(cacheKey, response, 30);
+    await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.ADMIN_AUCTIONS_PENDING);
     return res.status(200).json(response);
 });
 
@@ -134,7 +129,7 @@ export const getLiveAuctions = catchErrors(async (req, res) => {
         total: auctions.length,
     };
 
-    await cacheSetJson(cacheKey, response, 20);
+    await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.ADMIN_AUCTIONS_LIVE);
     return res.status(200).json(response);
 });
 
@@ -147,12 +142,20 @@ export const verifyAuctionByAdmin = catchErrors(async (req, res) => {
         return res.status(404).json({ success: false, message: "Auction not found" });
     }
 
+    const previousStatus = auction.status;
+
     auction.isVerified = Boolean(verified);
     if (!verified) {
         auction.status = "CANCELLED";
     }
     await auction.save();
-    await invalidateAdminCaches();
+    await invalidateAuctionMutationCaches({
+        auctionId: auction._id,
+        previousStatus,
+        nextStatus: auction.status,
+        creatorId: auction.createdBy,
+        clearSavedAuctions: true,
+    });
 
     const notification = await AdminNotification.findOne({ auctionId });
     if (notification?.notifications?.length) {
@@ -205,7 +208,7 @@ export const getAllDeliveriesForAdmin = catchErrors(async (req, res) => {
         total: deliveries.length,
     };
 
-    await cacheSetJson(cacheKey, response, 20);
+    await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.ADMIN_DELIVERIES_ALL);
     return res.status(200).json(response);
 });
 
@@ -241,7 +244,20 @@ export const updateDeliveryStatusByAdmin = catchErrors(async (req, res) => {
     delivery.status = normalizedStatus;
     delivery.timeline.push({ status: normalizedStatus, note });
     await delivery.save();
-    await invalidateAdminCaches();
+
+    const auction = await Auction.findById(delivery.auctionId).select("createdBy auctionWinner currentWinner status");
+
+    await invalidateAdminCacheGroups();
+    await invalidateProfileCachesForUser(delivery.userId);
+    if (auction?.createdBy) {
+        await invalidateProfileCachesForUser(auction.createdBy);
+    }
+    if (auction?.auctionWinner) {
+        await invalidateProfileCachesForUser(auction.auctionWinner);
+    }
+    if (auction?.currentWinner) {
+        await invalidateProfileCachesForUser(auction.currentWinner);
+    }
 
     return res.status(200).json({
         success: true,
@@ -291,6 +307,6 @@ export const getAllPaymentsForAdmin = catchErrors(async (req, res) => {
         total: payments.length,
     };
 
-    await cacheSetJson(cacheKey, response, 20);
+    await cacheSetJson(cacheKey, response, CACHE_TTL_SECONDS.ADMIN_PAYMENTS_ALL);
     return res.status(200).json(response);
 });

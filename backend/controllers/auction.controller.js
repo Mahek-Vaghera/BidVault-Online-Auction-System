@@ -13,24 +13,13 @@ import {
   updatePaymentRecord,
 } from "../services/razorpay.service.js";
 import { getDisplayName } from "../services/leaderboard.service.js";
-import { cacheDeleteByPrefix, cacheSetJson, cacheGetJson } from "../services/cache.service.js";
-
-const AUCTIONS_LIST_CACHE_TTL_SECONDS = 45;
-
-const invalidateAuctionCaches = async (auctionId) => {
-    await Promise.all([
-        cacheDeleteByPrefix("cache:auctions:list:"),
-        cacheDeleteByPrefix("cache:my-auctions:"),
-        cacheDeleteByPrefix("cache:admin:overview"),
-        cacheDeleteByPrefix("cache:admin:auctions:"),
-        cacheDeleteByPrefix("cache:admin:payments"),
-        cacheDeleteByPrefix("cache:admin:deliveries"),
-    ]);
-
-    if (auctionId) {
-        await cacheDeleteByPrefix(`cache:auction:${auctionId}:`);
-    }
-};
+import { cacheSetJson, cacheGetJson } from "../services/cache.service.js";
+import { getAuctionListCacheTtlSeconds } from "../services/cache-ttl.service.js";
+import {
+    invalidateAdminCacheGroups,
+    invalidateAuctionMutationCaches,
+    invalidateProfileCachesForUser,
+} from "../services/cache-invalidation.service.js";
 
 const hasCompleteAddress = (user) => {
     if (!user?.address) return false;
@@ -102,7 +91,12 @@ export const handleCreateAuction = catchErrors(async (req, res) => {
         }
     });
 
-    await invalidateAuctionCaches(auction._id);
+    await invalidateAuctionMutationCaches({
+        auctionId: auction._id,
+        nextStatus: auction.status,
+        creatorId: userId,
+        clearSavedAuctions: true,
+    });
 
     return res.status(201).json({
         success: true,
@@ -123,6 +117,8 @@ export const handleEditAuction = catchErrors(async (req, res) => {
 
     // find auction
     const auction = await Auction.findById(auctionId);
+        const previousStatus = auction.status;
+
     if (!auction) {
         return res.status(404).json({ success: false, message: "Auction not found" });
     }
@@ -220,7 +216,13 @@ export const handleEditAuction = catchErrors(async (req, res) => {
         }
     }); 
 
-    await invalidateAuctionCaches(auction._id);
+    await invalidateAuctionMutationCaches({
+        auctionId: auction._id,
+        previousStatus,
+        nextStatus: updatedAuction.status,
+        creatorId: userId,
+        clearSavedAuctions: true,
+    });
 
     res.status(200).json({ success: true, auction: updatedAuction });
 });
@@ -234,6 +236,8 @@ export const handleDeleteAuction = catchErrors(async (req, res) => {
     const userId = req.user._id;
     // find auction
     const auction = await Auction.findById(auctionId);
+        const previousStatus = auction.status;
+
     if (!auction) {
         return res.status(404).json({ success: false, message: "Auction not found" });
     }
@@ -263,7 +267,13 @@ export const handleDeleteAuction = catchErrors(async (req, res) => {
         type: "AUCTION_CANCELLED"
     });
 
-    await invalidateAuctionCaches(auction._id);
+    await invalidateAuctionMutationCaches({
+        auctionId: auction._id,
+        previousStatus,
+        nextStatus: "CANCELLED",
+        creatorId: userId,
+        clearSavedAuctions: true,
+    });
 
     res.status(200).json({ success: true });
 });
@@ -331,6 +341,15 @@ export const handleRegisterInAuction = catchErrors(async (req, res) => {
             }
         });
 
+        await invalidateAdminCacheGroups();
+        await invalidateAuctionMutationCaches({
+            auctionId: auction._id,
+            previousStatus: auction.status,
+            nextStatus: auction.status,
+            creatorId: auction.createdBy,
+            affectedUserIds: [userId],
+        });
+
         return res.status(200).json({
             success: true,
             message: "Payment order created successfully",
@@ -395,7 +414,13 @@ export const handleVerifyRegistrationPayment = catchErrors(async (req, res) => {
             }
         });
 
-        await invalidateAuctionCaches(auction._id);
+        await invalidateAuctionMutationCaches({
+            auctionId: auction._id,
+            previousStatus: auction.status,
+            nextStatus: auction.status,
+            creatorId: auction.createdBy,
+            affectedUserIds: [userId],
+        });
 
         return res.status(200).json({
             success: true,
@@ -426,6 +451,7 @@ export const handlePayment = catchErrors(async (req, res) => {
 
     // find auction
     const auction = await Auction.findById(auctionId);
+
     if (!auction) {
         return res.status(400).json({ success: false, message: "Auction not found" });
     }
@@ -464,6 +490,15 @@ export const handlePayment = catchErrors(async (req, res) => {
             }
         });
 
+        await invalidateAdminCacheGroups();
+        await invalidateAuctionMutationCaches({
+            auctionId: auction._id,
+            previousStatus: auction.status,
+            nextStatus: auction.status,
+            creatorId: auction.createdBy,
+            affectedUserIds: [userId, auction.auctionWinner],
+        });
+
         return res.status(200).json({
             success: true,
             message: "Payment order created successfully",
@@ -498,12 +533,15 @@ export const handleVerifyWinningPayment = catchErrors(async (req, res) => {
     try {
         // Find auction
         const auction = await Auction.findById(auctionId);
+
         if (!auction) {
             return res.status(400).json({
                 success: false,
                 message: "Auction not found"
             });
         }
+
+        const previousStatus = auction.status;
 
         // Update auction as completed after successful payment verification.
         auction.finalPrice = auction.currentBid;
@@ -561,7 +599,14 @@ export const handleVerifyWinningPayment = catchErrors(async (req, res) => {
             message: `Payment received from ${getDisplayName(user)} for auction - ${auction.title}. Amount: ₹${auction.finalPrice}`,
         });
 
-        await invalidateAuctionCaches(auction._id);
+        await invalidateAuctionMutationCaches({
+            auctionId: auction._id,
+            previousStatus,
+            nextStatus: auction.status,
+            creatorId: auction.createdBy,
+            affectedUserIds: [userId, auction.auctionWinner],
+            clearSavedAuctions: true,
+        });
 
         return res.status(200).json({
             success: true,
@@ -588,6 +633,7 @@ export const handleBuyNow = catchErrors(async (req, res) => {
     const userId = req.user._id;
 
     const auction = await Auction.findById(auctionId);
+
     if (!auction) {
         return res.status(404).json({ success: false, message: "Auction not found" });
     }
@@ -631,6 +677,15 @@ export const handleBuyNow = catchErrors(async (req, res) => {
             }
         });
 
+        await invalidateAdminCacheGroups();
+        await invalidateAuctionMutationCaches({
+            auctionId: auction._id,
+            previousStatus: auction.status,
+            nextStatus: auction.status,
+            creatorId: auction.createdBy,
+            affectedUserIds: [userId],
+        });
+
         return res.status(200).json({
             success: true,
             message: "Buy It Now payment order created",
@@ -660,6 +715,8 @@ export const handleVerifyBuyNowPayment = catchErrors(async (req, res) => {
     if (!auction) {
         return res.status(404).json({ success: false, message: "Auction not found" });
     }
+
+    const previousStatus = auction.status;
 
     const now = new Date();
     if (auction.status !== "UPCOMING" || (auction.registrationsStartTime && now >= auction.registrationsStartTime)) {
@@ -720,7 +777,14 @@ export const handleVerifyBuyNowPayment = catchErrors(async (req, res) => {
         message: `Buy It Now payment received for auction - ${auction.title}. Amount: ₹${auction.buyItNow}`,
     });
 
-    await invalidateAuctionCaches(auction._id);
+    await invalidateAuctionMutationCaches({
+        auctionId: auction._id,
+        previousStatus,
+        nextStatus: auction.status,
+        creatorId: auction.createdBy,
+        affectedUserIds: [userId, auction.auctionWinner],
+        clearSavedAuctions: true,
+    });
 
     return res.status(200).json({
         success: true,
@@ -764,7 +828,7 @@ export const listAuctions = catchErrors(async (req, res) => {
         .populate('createdBy', 'username fullname email createdAt');
 
     const response = { success: true, auctions };
-    await cacheSetJson(cacheKey, response, AUCTIONS_LIST_CACHE_TTL_SECONDS);
+    await cacheSetJson(cacheKey, response, getAuctionListCacheTtlSeconds(normalizedStatusKey || "ALL"));
     res.status(200).json(response);
 });
 
@@ -890,6 +954,14 @@ export const toggleSaveAuction = catchErrors(async (req, res) => {
     }
 
     await user.save();
+    await invalidateProfileCachesForUser(userId, {
+        includeRecentActivities: false,
+        includeMyAuctions: false,
+        includeSavedAuctions: true,
+        includeWinningAuctions: false,
+        includeStats: false,
+        includeLegacyMyAuctions: false,
+    });
 
     return res.status(200).json({
         success: true,
