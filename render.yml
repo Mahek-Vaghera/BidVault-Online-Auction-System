@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: frontend
+    env: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    routes:
+      - path: "/*"
+        dest: /index.html
+    envPath: frontend/.env
+
+  - type: web
+    name: backend
+    env: node
+    region: oregon
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm run start
+    envPath: backend/.env
+    envVars:
+      - key: NODE_ENV
+        value: production

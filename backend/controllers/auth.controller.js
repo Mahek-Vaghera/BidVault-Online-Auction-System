@@ -49,7 +49,8 @@ export const handleRegister = catchErrors(async (req, res) => {
       existingUser.verificationCode = verificationCode;
       await existingUser.save();
 
-      await SendVerificationCode(email, verificationCode);
+      console.info("[auth:register] sending verification email for existing unverified user", { email });
+      void SendVerificationCode(email, verificationCode);
 
       return res.status(200).json({
         success: true,
@@ -71,13 +72,16 @@ export const handleRegister = catchErrors(async (req, res) => {
     });
 
     // send verification code to email
-    await SendVerificationCode(email, verificationCode);
+    console.info("[auth:register] sending verification email", { email });
+    void SendVerificationCode(email, verificationCode);
 
+    console.info("[auth:register] completed", { email });
     res.status(201).json({ success: true, message: "User registered successfully. Please check your email for the verification code." });
 });
 
 // verify email
 export const verifyEmail = catchErrors(async (req, res)=> {
+  console.info("[auth:verify-email] received", { email: req.body?.email });
     
     // take data from body
     const { email, code } = req.body;
@@ -94,7 +98,8 @@ export const verifyEmail = catchErrors(async (req, res)=> {
     await user.save();
 
     // send welcome email
-    await WelcomeEmail(user.email, user.username);
+    console.info("[auth:verify-email] sending welcome email", { email: user.email });
+    void WelcomeEmail(user.email, user.username);
 
     // generate token and set cookie
     const token = setUser(user);
@@ -115,6 +120,7 @@ export const verifyEmail = catchErrors(async (req, res)=> {
 
 // login user
 export const handleLogin = catchErrors(async (req, res) => {
+  console.info("[auth:login] received", { email: req.body?.email });
 
     // take data from body
     const { email, password } = req.body;
@@ -154,6 +160,7 @@ export const handleLogin = catchErrors(async (req, res) => {
 
   // resend verification code for unverified user
   export const handleResendVerificationCode = catchErrors(async (req, res) => {
+    console.info("[auth:resend-verification] received", { email: req.body?.email });
     const { email } = req.body;
 
     const user = await User.findOne({ email });
@@ -169,7 +176,8 @@ export const handleLogin = catchErrors(async (req, res) => {
     user.verificationCode = verificationCode;
     await user.save();
 
-    await SendVerificationCode(email, verificationCode);
+    console.info("[auth:resend-verification] sending verification email", { email });
+    void SendVerificationCode(email, verificationCode);
 
     return res.status(200).json({ success: true, message: "Verification code resent successfully" });
   });
@@ -189,6 +197,7 @@ export const handleLogout = catchErrors(async (req, res) => {
 
 // reset password email (click on forgot password)
 export const handleResetPwdEmail = catchErrors(async (req, res) => {
+  console.info("[auth:reset-password-email] received", { email: req.body?.email });
     // take data from body
     const { email } = req.body;
 
@@ -212,7 +221,8 @@ export const handleResetPwdEmail = catchErrors(async (req, res) => {
 
     const resetPwdLink = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}&email=${encodeURIComponent(email)}`;
 
-    await SendResetPwdEmail(email, resetPwdLink);
+    console.info("[auth:reset-password-email] sending reset email", { email });
+    void SendResetPwdEmail(email, resetPwdLink);
 
     return res.status(200).json({ success: true, message: "Reset Password link is shared in your Email"});
 });
