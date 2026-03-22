@@ -1,154 +1,122 @@
+import "dotenv/config";
 import express from "express";
-import path from "path";
-import { fileURLToPath } from "url";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
 import Redis from "ioredis";
-import { createAdapter } from "@socket.io/redis-adapter"; // Fix 1: Import specifically
+import { createAdapter } from "@socket.io/redis-adapter";
 
 import { errorHandler } from "./middlewares/errorHandler.middleware.js";
 import connectDB from "./services/db.service.js";
 import { initializeSocketHandlers } from "./services/socket.service.js";
 import { startAuctionCompletionJob } from "./services/auction.completion.service.js";
 
+import authRoutes from "./routes/auth.routes.js";
+import adminRoutes from "./routes/admin.routes.js";
+import auctionRoutes from "./routes/auction.routes.js";
+import bidRoutes from "./routes/bid.routes.js";
+import leaderboardRoutes from "./routes/leaderboard.routes.js";
+
 const app = express();
 app.set("trust proxy", true);
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(cookieParser());
 
-const createRedisOptions = () => {
-  const redisUrl = process.env.REDIS_URL;
-  if (redisUrl) {
-    return {
-      url: redisUrl,
-      tls: redisUrl.startsWith("rediss://") ? { rejectUnauthorized: false } : undefined,
-    };
-  }
 
-  return {
-    host: process.env.REDIS_HOST || "localhost",
-    port: Number(process.env.REDIS_PORT || 6379),
-  };
-};
-
-const redisOptions = createRedisOptions();
-
-let pubClient = null;
-let subClient = null;
-const hasTcpRedisConfig = Boolean(process.env.REDIS_URL || process.env.REDIS_HOST || process.env.REDIS_PORT);
-
-if (hasTcpRedisConfig) {
-  pubClient = new Redis(redisOptions.url || redisOptions);
-  subClient = pubClient.duplicate();
-}
-
-const httpServer = createServer(app);
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   "http://localhost:3000",
   "http://localhost:5173",
 ].filter(Boolean);
 
-const ioConfig = {
-  cors: {
-    origin: (origin, callback) => {
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      // allow requests with no origin
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error("CORS origin not allowed"));
+
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+
+      return callback(new Error("CORS not allowed"));
     },
-    methods: ["GET", "POST"],
     credentials: true,
-  },
-};
-
-if (pubClient && subClient) {
-  ioConfig.adapter = createAdapter(pubClient, subClient);
-} else {
-  console.warn("Socket.IO Redis adapter disabled: REDIS_URL/REDIS_HOST not configured. Running with in-memory adapter.");
-}
-
-const io = new Server(httpServer, ioConfig);
-
-// connect to db
-const PORT = process.env.PORT || 5000;
-connectDB()
-  .then(() => {
-    httpServer.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-    
-    // Start auction completion job
-    startAuctionCompletionJob(io);
   })
-  .catch((err) => {
-    console.error("Database connection failed");
+);
+
+let io;
+
+try {
+  const redisUrl = process.env.REDIS_URL;
+
+  const pubClient = redisUrl
+    ? new Redis(redisUrl)
+    : null;
+
+  const subClient = pubClient
+    ? pubClient.duplicate()
+    : null;
+
+  const httpServer = createServer(app);
+
+  const ioConfig = {
+    cors: {
+      origin: allowedOrigins,
+      credentials: true,
+    },
+  };
+
+  if (pubClient && subClient) {
+    ioConfig.adapter = createAdapter(pubClient, subClient);
+  }
+
+  io = new Server(httpServer, ioConfig);
+
+  app.locals.io = io;
+
+  initializeSocketHandlers(io);
+
+  app.get("/", (req, res) => {
+    res.send("BidVault Online Auction System");
   });
 
-// Make io available to all routes via app.locals
-app.locals.io = io;
+  app.use("/auth", authRoutes);
+  app.use("/bidvault/auth", authRoutes);
 
-// Initialize Socket.IO handlers
-initializeSocketHandlers(io);
+  app.use("/admin", adminRoutes);
+  app.use("/bidvault/admin", adminRoutes);
 
-//middlewares
-app.use(express.urlencoded({ extended: true }));
-app.use(express.json());       
-app.use(cookieParser());
+  app.use("/auctions", auctionRoutes);
+  app.use("/bidvault/auctions", auctionRoutes);
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    if (!origin) return callback(null, true);
-    if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error("CORS origin not allowed"));
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-};
+  app.use("/auctions/:auctionId", bidRoutes);
+  app.use("/bidvault/auctions/:auctionId", bidRoutes);
 
-app.use(cors(corsOptions));
-app.options("*", cors(corsOptions));
+  app.use("/auctions", leaderboardRoutes);
+  app.use("/bidvault/auctions", leaderboardRoutes);
 
-// home page
-app.get("/", (req, res) => res.send("BidVault Online Auction System") );
+  app.use(errorHandler);
 
-// auth routes
-import authRoutes from "./routes/auth.routes.js";
-app.use("/bidvault/auth", authRoutes);
-// Alias routes without the `/bidvault` prefix for compatibility with deployed frontend
-app.use("/auth", authRoutes);
+  const PORT = process.env.PORT || 5000;
 
-// admin routes
-import adminRoutes from "./routes/admin.routes.js";
-app.use("/bidvault/admin", adminRoutes);
-app.use("/admin", adminRoutes);
+  connectDB()
+    .then(() => {
+      httpServer.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
 
-// auction routes
-import auctionRoutes from "./routes/auction.routes.js";
-app.use("/bidvault/auctions", auctionRoutes);
-app.use("/auctions", auctionRoutes);
+        startAuctionCompletionJob(io);
+      });
+    })
+    .catch((err) => {
+      console.error("Database connection failed:", err);
+    });
 
-// bid routes
-import bidRoutes from "./routes/bid.routes.js";
-app.use("/bidvault/auctions/:auctionId", bidRoutes);
-app.use("/auctions/:auctionId", bidRoutes);
-
-// leaderboard routes
-import leaderboardRoutes from "./routes/leaderboard.routes.js";
-app.use("/bidvault/auctions", leaderboardRoutes);
-app.use("/auctions", leaderboardRoutes);
-
-if (process.env.NODE_ENV === "production") {
-  const clientDistPath = path.resolve(__dirname, "../frontend/dist");
-  app.use(express.static(clientDistPath));
-
-  app.get("*", (req, res, next) => {
-    if (req.method !== "GET") return next();
-    return res.sendFile(path.join(clientDistPath, "index.html"));
-  });
+} catch (err) {
+  console.error("Server startup error:", err);
 }
-
-// error handling middleware
-app.use(errorHandler);   
 
 export default app;
