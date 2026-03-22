@@ -95,14 +95,19 @@ initializeSocketHandlers(io);
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());       
 app.use(cookieParser());
-app.use(cors({
+
+const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
     if (allowedOrigins.includes(origin)) return callback(null, true);
-    return callback(new Error('CORS origin not allowed'));
+    return callback(new Error("CORS origin not allowed"));
   },
   credentials: true,
-})); 
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+};
+
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 
 // home page
 app.get("/", (req, res) => res.send("BidVault Online Auction System") );
