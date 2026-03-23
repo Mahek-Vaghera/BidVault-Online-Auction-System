@@ -33,6 +33,8 @@ export default function Dashboard() {
         if (
           target.isIntersecting &&
           !fetchingRef.current &&
+          !loading &&
+          !loadingMore &&
           hasMore
         ) {
           fetchingRef.current = true
@@ -53,11 +55,15 @@ export default function Dashboard() {
   }, [loading, loadingMore, hasMore])
 
   const handleFilterChange = (option) => {
-    setFilter(option)
+    if (option === filter) return
+
+    fetchingRef.current = false
+
+    setAuctions([])
     setPage(1)
     setHasMore(true)
     setLoadingMore(false)
-    setAuctions([])
+    setFilter(option)
   }
 
   const fetchStatsAuctions = async () => {
@@ -73,7 +79,9 @@ export default function Dashboard() {
   }
 
   const fetchAuctions = async () => {
-    setLoading(true)
+    if (page === 1) {
+      setLoading(true)
+    }
     setError('')
 
     try {
@@ -89,7 +97,14 @@ export default function Dashboard() {
         if (page === 1) {
           setAuctions(newAuctions)
         } else {
-          setAuctions(prev => [...prev, ...newAuctions])
+          setAuctions(prev => {
+            const merged = [...prev, ...newAuctions]
+
+            return merged.filter(
+              (auction, index, self) =>
+                index === self.findIndex(a => a._id === auction._id)
+            )
+          })
         }
       }
     } catch (err) {

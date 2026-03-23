@@ -6,7 +6,7 @@ export const normalizeAuctionStatusCacheKey = (status) => {
   return normalized || "ALL";
 };
 
-export const buildAuctionListCacheKey = (status) =>
+export const buildAuctionListCachePrefix = (status) =>
   `cache:auctions:list:${normalizeAuctionStatusCacheKey(status || "ALL")}`;
 
 export const buildProfileRecentActivitiesCacheKey = (userId, skip, limit) =>
@@ -28,14 +28,23 @@ export const buildProfileStatsCacheKey = (userId) =>
   `cache:profile:stats:${userId}`;
 
 export const invalidateAuctionListCachesByStatuses = async (statuses = []) => {
-  const keys = new Set([buildAuctionListCacheKey("ALL")]);
+  const prefixes = new Set([
+    buildAuctionListCachePrefix("ALL")
+  ]);
 
   for (const status of statuses) {
     if (!status) continue;
-    keys.add(buildAuctionListCacheKey(status));
+
+    prefixes.add(
+      buildAuctionListCachePrefix(status)
+    );
   }
 
-  await Promise.all(Array.from(keys).map((key) => cacheDelete(key)));
+  await Promise.all(
+    Array.from(prefixes).map(prefix =>
+      cacheDeleteByPrefix(prefix)
+    )
+  );
 };
 
 export const invalidateAdminCacheGroups = async () => {
