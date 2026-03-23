@@ -800,10 +800,12 @@ export const handleVerifyBuyNowPayment = catchErrors(async (req, res) => {
 export const listAuctions = catchErrors(async (req, res) => {
     
     // take status from query
-    const { status } = req.query;
+    const { status, page } = req.query;
     const normalizedStatus = String(status || "").toUpperCase();
     const normalizedStatusKey = normalizedStatus === "ENDED" ? "COMPLETED" : normalizedStatus;
-    const cacheKey = `cache:auctions:list:${normalizedStatusKey || "ALL"}`;
+    const pageNumber = Number(page) || 1;
+    const limit = 20;
+    const cacheKey = `cache:auctions:list:${normalizedStatusKey || "ALL"}:${pageNumber}`;
     const cached = await cacheGetJson(cacheKey);
     if (cached) {
         return res.status(200).json(cached);
@@ -821,13 +823,22 @@ export const listAuctions = catchErrors(async (req, res) => {
         ...(statusFilter ? { status: statusFilter } : {}),
         isVerified: true,
     };
+
+    const total = await Auction.countDocuments(filter);
+
     const auctions = await Auction.find(filter)
         .sort({ createdAt: -1 })
-        .limit(20)
+        .skip((pageNumber - 1) * limit)
+        .limit(limit)
         .populate('product')
         .populate('createdBy', 'username fullname email createdAt');
 
-    const response = { success: true, auctions };
+    const response = {
+        success: true,
+        auctions,
+        hasMore: pageNumber * limit < total,
+    };
+    
     await cacheSetJson(cacheKey, response, getAuctionListCacheTtlSeconds(normalizedStatusKey || "ALL"));
     res.status(200).json(response);
 });
