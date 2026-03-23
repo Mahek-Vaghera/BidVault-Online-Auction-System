@@ -58,8 +58,20 @@ export default function CreateAuction() {
       }
 
       const formDataToSend = new FormData()
+      
       Object.keys(formData).forEach((key) => {
-        formDataToSend.append(key, formData[key])
+        if (
+          key === 'registrationsStartTime' ||
+          key === 'startTime' ||
+          key === 'endTime'
+        ) {
+          formDataToSend.append(
+            key,
+            new Date(formData[key]).toISOString()
+          )
+        } else {
+          formDataToSend.append(key, formData[key])
+        }
       })
       images.forEach((image) => {
         formDataToSend.append('images', image)

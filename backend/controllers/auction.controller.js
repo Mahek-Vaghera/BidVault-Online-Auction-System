@@ -117,11 +117,11 @@ export const handleEditAuction = catchErrors(async (req, res) => {
 
     // find auction
     const auction = await Auction.findById(auctionId);
-        const previousStatus = auction.status;
-
+    
     if (!auction) {
         return res.status(404).json({ success: false, message: "Auction not found" });
     }
+    const previousStatus = auction.status;
 
     // only auction creator can edit
     if (auction.createdBy.toString() !== userId.toString()) {
@@ -152,6 +152,18 @@ export const handleEditAuction = catchErrors(async (req, res) => {
                 ? "After verification, only registrations start time, auction start time, auction end time, and description can be edited"
                 : "Invalid fields in edit payload",
         });
+    }
+
+    if (updates.startTime) {
+        updates.startTime = new Date(updates.startTime);
+    }
+
+    if (updates.endTime) {
+        updates.endTime = new Date(updates.endTime);
+    }
+
+    if (updates.registrationsStartTime) {
+        updates.registrationsStartTime = new Date(updates.registrationsStartTime);
     }
 
     const auctionUpdates = { ...updates, updatedAt: new Date() };
@@ -838,7 +850,7 @@ export const listAuctions = catchErrors(async (req, res) => {
         auctions,
         hasMore: pageNumber * limit < total,
     };
-    
+
     await cacheSetJson(cacheKey, response, getAuctionListCacheTtlSeconds(normalizedStatusKey || "ALL"));
     res.status(200).json(response);
 });

@@ -475,9 +475,18 @@ export default function AuctionDetail() {
       }
 
       const payload = {
-        registrationsStartTime: editData.registrationsStartTime,
-        startTime: editData.startTime,
-        endTime: editData.endTime,
+        registrationsStartTime: new Date(
+          editData.registrationsStartTime
+        ).toISOString(),
+
+        startTime: new Date(
+          editData.startTime
+        ).toISOString(),
+
+        endTime: new Date(
+          editData.endTime
+        ).toISOString(),
+
         description: editData.description,
       }
 
@@ -781,7 +790,7 @@ export default function AuctionDetail() {
             </div>
 
             {/* Registration Card - Show before auction starts */}
-            {auction.status === 'UPCOMING' && !isCreator && new Date() >= new Date(auction.registrationsStartTime) && new Date() < new Date(auction.startTime) && (
+            {auction.status === 'UPCOMING' && !isCreator && now >= new Date(auction.registrationsStartTime) && now < new Date(auction.startTime) && (
               <div className="bg-gradient-to-br from-accent-600 to-accent-700 rounded-xl shadow-lg p-6 text-white">
                 <h3 className="text-lg font-bold mb-3">Register for Auction</h3>
                 <p className="text-accent-100 text-sm mb-4">

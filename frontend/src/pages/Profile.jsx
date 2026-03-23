@@ -413,12 +413,21 @@ export default function Profile() {
       const postVerification = isPostVerificationEdit(auctionItem?.auction)
 
       const payload = {
-        registrationsStartTime: myAuctionEditData.registrationsStartTime,
-        startTime: myAuctionEditData.startTime,
-        endTime: myAuctionEditData.endTime,
+        registrationsStartTime: new Date(
+          myAuctionEditData.registrationsStartTime
+        ).toISOString(),
+
+        startTime: new Date(
+          myAuctionEditData.startTime
+        ).toISOString(),
+
+        endTime: new Date(
+          myAuctionEditData.endTime
+        ).toISOString(),
+
         description: myAuctionEditData.description,
       }
-
+      
       if (!postVerification) {
         payload.title = myAuctionEditData.title
         payload.productName = myAuctionEditData.productName
