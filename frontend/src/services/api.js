@@ -28,6 +28,7 @@ export const authAPI = {
 
 // Auction APIs
 export const auctionAPI = {
+  stats: () => api.get('/auctions/stats'),
   list: (status, page = 1) => api.get('/auctions', { params: { status, page } }),
   getOne: (auctionId) => api.get(`/auctions/${auctionId}`),
   create: (data) => api.post('/auctions/create', data),

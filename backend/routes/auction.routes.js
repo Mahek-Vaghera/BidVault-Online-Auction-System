@@ -12,7 +12,8 @@ import {
     toggleSaveAuction,
     handleGetMyDeliveryForAuction,
     listAuctions,
-    getAuction
+    getAuction,
+    getAuctionStats
 } from "../controllers/auction.controller.js";
 
 // middlewares
@@ -93,6 +94,12 @@ router.post("/:auctionId/save",
 router.get("/:auctionId/delivery",
     restrictToLoggedInUserOnly,
     handleGetMyDeliveryForAuction
+);
+
+router.get(
+    "/stats",
+    restrictToLoggedInUserOnly,
+    getAuctionStats
 );
 
 // get list of auctions with status filter

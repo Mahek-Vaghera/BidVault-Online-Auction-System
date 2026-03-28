@@ -1017,3 +1017,55 @@ export const handleGetMyDeliveryForAuction = catchErrors(async (req, res) => {
 
     return res.status(200).json({ success: true, delivery });
 });
+
+export const getAuctionStats = catchErrors(async (req, res) => {
+
+    const stats = await Auction.aggregate([
+        {
+            $match: {
+                isVerified: true
+            }
+        },
+        {
+            $group: {
+                _id: "$status",
+                count: { $sum: 1 },
+                totalBids: { $sum: "$totalBids" }
+            }
+        }
+    ]);
+
+    const response = {
+        live: 0,
+        upcoming: 0,
+        completed: 0,
+        cancelled: 0,
+        totalBids: 0,
+    };
+
+    stats.forEach((item) => {
+
+        if (item._id === "LIVE") {
+            response.live = item.count;
+        }
+
+        if (item._id === "UPCOMING") {
+            response.upcoming = item.count;
+        }
+
+        if (item._id === "COMPLETED" || item._id === "ENDED") {
+            response.completed += item.count;
+        }
+
+        if (item._id === "CANCELLED") {
+            response.cancelled = item.count;
+        }
+
+        response.totalBids += item.totalBids || 0;
+    });
+
+    return res.status(200).json({
+        success: true,
+        stats: response
+    });
+});

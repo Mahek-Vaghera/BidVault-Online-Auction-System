@@ -6,7 +6,13 @@ import AuctionCard from '../components/AuctionCard'
 
 export default function Dashboard() {
   const [auctions, setAuctions] = useState([])
-  const [statsAuctions, setStatsAuctions] = useState([])
+  const [statsData, setStatsData] = useState({
+    live: 0,
+    upcoming: 0,
+    completed: 0,
+    cancelled: 0,
+    totalBids: 0
+  })
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState('ALL')
   const [error, setError] = useState('')
@@ -68,10 +74,10 @@ export default function Dashboard() {
 
   const fetchStatsAuctions = async () => {
     try {
-      const response = await auctionAPI.list(null, 1)
+      const response = await auctionAPI.stats()
 
       if (response.data.success) {
-        setStatsAuctions(response.data.auctions || [])
+        setStatsData(response.data.stats)
       }
     } catch (err) {
       console.error(err)
@@ -120,30 +126,25 @@ export default function Dashboard() {
   const stats = [
     {
       label: 'Active Auctions',
-      value: statsAuctions.filter(a => a.status === 'LIVE').length,
+      value: statsData.live,
       icon: TrendingUp,
       color: 'primary'
     },
     {
       label: 'Upcoming',
-      value: statsAuctions.filter(a => a.status === 'UPCOMING').length,
+      value: statsData.upcoming,
       icon: Clock,
       color: 'accent'
     },
     {
       label: 'Completed',
-      value: statsAuctions.filter(
-        a => a.status === 'COMPLETED' || a.status === 'ENDED'
-      ).length,
+      value: statsData.completed,
       icon: DollarSign,
       color: 'success'
     },
     {
       label: 'Total Bids',
-      value: statsAuctions.reduce(
-        (sum, a) => sum + (a.totalBids || 0),
-        0
-      ),
+      value: statsData.totalBids,
       icon: Users,
       color: 'accent'
     }
