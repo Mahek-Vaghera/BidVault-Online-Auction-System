@@ -839,7 +839,7 @@ export const listAuctions = catchErrors(async (req, res) => {
     const total = await Auction.countDocuments(filter);
 
     const auctions = await Auction.find(filter)
-        .sort({ createdAt: -1 })
+        .sort({ startTime: 1 })
         .skip((pageNumber - 1) * limit)
         .limit(limit)
         .populate('product')
