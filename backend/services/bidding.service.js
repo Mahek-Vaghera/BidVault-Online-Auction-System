@@ -4,7 +4,7 @@ import AutoBid from "../models/autobid.model.js";
 import User from "../models/user.model.js";
 import { createAuctionLog } from "./log.service.js";
 import { SendOutBidEmail } from "./mail_service/email.sender.js";
-import { getDisplayName } from "./leaderboard.service.js";
+import { buildAuctionLeaderboard, getDisplayName } from "./leaderboard.service.js";
 import { acquireDistributedLock, releaseDistributedLock } from "./redis.service.js";
 import { invalidateAuctionMutationCaches } from "./cache-invalidation.service.js";
 
@@ -14,7 +14,7 @@ export const placeBidWithLock = async (
   bidAmount,
   io
 ) => {
-  const lockKey = `bid-lock:${auctionId}`;
+  const lockKey = `auction-bid-lock:${auctionId}`;
   let lock;
 
   try {
@@ -79,7 +79,7 @@ export const placeBidWithLock = async (
     auction.totalBids += 1;
     await auction.save();
 
-    // Get user details
+   // Get user details
     const user = await User.findById(userId);
 
     // Create log
@@ -90,6 +90,26 @@ export const placeBidWithLock = async (
       type: "MANUAL_BID_PLACED",
       details: { amount: bidAmount }
     });
+
+    // Emit real-time bid update + leaderboard update
+    if (io) {
+      io.to(`auction:${auctionId}`).emit("bid-update", {
+        auctionId,
+        currentBid: auction.currentBid,
+        currentWinner: user._id,
+        winnerName: getDisplayName(user),
+        totalBids: auction.totalBids,
+        timestamp: new Date()
+      });
+
+      const lb = await buildAuctionLeaderboard(auctionId);
+
+      io.to(`auction:${auctionId}`).emit("leaderboard-update", {
+        auctionId,
+        leaderboard: lb.leaderboard,
+        timestamp: new Date()
+      });
+    }
 
     // Check for auction extension (last 2 minutes)
     const now = new Date();

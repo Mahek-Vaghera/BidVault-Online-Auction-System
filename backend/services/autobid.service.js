@@ -12,7 +12,7 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 
 export const handleAutoBids = async (auctionId, io = null, options = {}) => {
-  const lockKey = `autobid-lock:${auctionId}`;
+  const lockKey = `auction-bid-lock:${auctionId}`;
   let lock;
   const bidStepDelayMs = Math.max(
     0,
