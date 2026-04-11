@@ -148,14 +148,11 @@ export const placeBidWithLock = async (
       affectedUserIds: [userId, previousWinnerId],
     });
 
-    // Release lock
-    await releaseDistributedLock(lock);
-
     return { success: true, bid, auction };
   } catch (error) {
-    // Release lock on error
-    await releaseDistributedLock(lock);
     throw error;
+  } finally {
+    await releaseDistributedLock(lock);
   }
 };
 

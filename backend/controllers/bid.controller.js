@@ -67,22 +67,8 @@ export const handlePlaceBid = catchErrors(async (req, res) => {
         // Place bid with lock
         const result = await placeBidWithLock(auctionId, userId, bidAmount, io);
 
-        // Emit real-time bid update
-        if (io) {
-            const user = await User.findById(userId);
-            io.to(`auction:${auctionId}`).emit("bid-update", {
-                auctionId,
-                currentBid: result.auction.currentBid,
-                currentWinner: userId,
-                winnerName: getDisplayName(user),
-                totalBids: result.auction.totalBids,
-                timestamp: new Date()
-            });
-        }
-
         // After manual bid, trigger auto-bids (other bidders might respond)
         await handleAutoBids(auctionId, io);
-        await emitLeaderboard(io, auctionId);
 
         return res.status(200).json({
             success: true,

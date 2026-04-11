@@ -12,167 +12,192 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 
 export const handleAutoBids = async (auctionId, io = null, options = {}) => {
-  const lockKey = `auction-bid-lock:${auctionId}`;
-  let lock;
-  const bidStepDelayMs = Math.max(
-    0,
-    Number(options.bidStepDelayMs ?? process.env.AUTOBID_STEP_DELAY_MS ?? 1000) || 0
-  );
+    const lockKey = `auction-bid-lock:${auctionId}`;
 
-  try {
-    lock = await acquireDistributedLock(lockKey, 15000, 15000, 50);
+    const bidStepDelayMs = Math.max(
+        0,
+        Number(
+            options.bidStepDelayMs ??
+            process.env.AUTOBID_STEP_DELAY_MS ??
+            1000
+        ) || 0
+    );
 
-    let cycleGuard = 0;
-    while (cycleGuard < 100) {
-      cycleGuard += 1;
+    try {
+        let cycleGuard = 0;
 
-      const auction = await Auction.findById(auctionId);
-      if (!auction || auction.status !== "LIVE") break;
+        while (cycleGuard < 100) {
+            cycleGuard += 1;
 
-      let currentBid = Math.max(auction.currentBid, auction.startingPrice);
-      const minIncrement = auction.minIncrement;
+            let lock = null;
+            let bidPlacedThisCycle = false;
 
-      // Find all active autobids, sorted by max limit desc and earliest setup first.
-      const autoBidders = await AutoBid.find({ auctionId, isActive: true })
-        .sort({ maxLimit: -1, createdAt: 1 })
-        .select("userId maxLimit isActive lastBidAmount totalAutoBidsPlaced lastTriggeredAt");
+            try {
+                // 1. Acquire lock for ONE bid operation
+                lock = await acquireDistributedLock(
+                    lockKey,
+                    5000,
+                    5000,
+                    50
+                );
 
-      if (!autoBidders.length) break;
+                // 2. Fetch latest auction INSIDE the lock
+                const auction = await Auction.findById(auctionId);
 
-      let bidPlacedThisCycle = false;
+                if (!auction || auction.status !== "LIVE") {
+                    break;
+                }
 
-      for (const autobid of autoBidders) {
-        const bidderId = autobid.userId;
-        const previousWinnerId = auction.currentWinner;
-        // Skip if this bidder already has the highest bid.
-        if (String(bidderId) === String(auction.currentWinner)) continue;
+                let currentBid = Math.max(
+                    auction.currentBid,
+                    auction.startingPrice
+                );
 
-        const user = await User.findById(bidderId);
-        if (!user) {
-          console.warn(`User with ID ${bidderId} not found for auto-bid processing.`);
-          continue;
-        }
+                const minIncrement = auction.minIncrement;
 
-        const nextBid = currentBid + minIncrement;
+                const autoBidders = await AutoBid.find({
+                    auctionId,
+                    isActive: true
+                })
+                    .sort({ maxLimit: -1, createdAt: 1 })
+                    .select(
+                        "userId maxLimit isActive lastBidAmount totalAutoBidsPlaced lastTriggeredAt"
+                    );
 
-        // Deactivate if max limit is exceeded.
-        if (nextBid > autobid.maxLimit) {
-          try {
-            await SendOutBidEmail(
-              user.email,
-              auction.title,
-              currentBid,
-              autobid.maxLimit,
-              auctionId,
-              auction.title
-            );
-          } catch (emailErr) {
-            console.error("Error sending outbid email:", emailErr);
-          }
+                if (!autoBidders.length) {
+                    break;
+                }
 
-          autobid.isActive = false;
-          await autobid.save();
-          continue;
-        }
+                for (const autobid of autoBidders) {
+                    const bidderId = autobid.userId;
+                    const previousWinnerId = auction.currentWinner;
 
-        let bid = await Bid.findOne({ auctionId, userId: bidderId });
-        if (bid) {
-          bid.oldBidAmounts.push(bid.amount);
-          bid.amount = nextBid;
-          await bid.save();
-        } else {
-          await Bid.create({
-            auctionId,
-            userId: bidderId,
-            amount: nextBid
-          });
-        }
+                    // Already winning
+                    if (
+                        String(bidderId) ===
+                        String(auction.currentWinner)
+                    ) {
+                        continue;
+                    }
 
-        autobid.lastBidAmount = nextBid;
-        autobid.lastTriggeredAt = new Date();
-        autobid.totalAutoBidsPlaced += 1;
-        await autobid.save();
+                    const user = await User.findById(bidderId);
 
-        auction.currentBid = nextBid;
-        auction.currentWinner = bidderId;
-        auction.totalBids += 1;
-        await auction.save();
+                    if (!user) {
+                        continue;
+                    }
 
-        await createAuctionLog({
-          auctionId,
-          userId: bidderId,
-          userName: getDisplayName(user),
-          type: "AUTO_BID_TRIGGERED",
-          details: { bidAmount: nextBid }
-        });
+                    const nextBid = currentBid + minIncrement;
 
-        const now = new Date();
-        const timeDiff = auction.endTime - now;
+                    // Maximum limit reached
+                    if (nextBid > autobid.maxLimit) {
+                        autobid.isActive = false;
+                        await autobid.save();
+                        continue;
+                    }
 
-        if (timeDiff <= 2 * 60 * 1000 && timeDiff > 0) {
-          auction.endTime = new Date(auction.endTime.getTime() + 10 * 60 * 1000);
-          await auction.save();
+                    // Place bid
+                    let bid = await Bid.findOne({
+                        auctionId,
+                        userId: bidderId
+                    });
 
-          await createAuctionLog({
-            auctionId,
-            userName: "System",
-            type: "AUCTION_EXTENDED",
-            details: {
-              reason: "Auto-bid placed in last 2 minutes - extended by 10 minutes",
-              newEndTime: auction.endTime
+                    if (bid) {
+                        bid.oldBidAmounts.push(bid.amount);
+                        bid.amount = nextBid;
+                        await bid.save();
+                    } else {
+                        await Bid.create({
+                            auctionId,
+                            userId: bidderId,
+                            amount: nextBid
+                        });
+                    }
+
+                    // Update AutoBid
+                    autobid.lastBidAmount = nextBid;
+                    autobid.lastTriggeredAt = new Date();
+                    autobid.totalAutoBidsPlaced += 1;
+                    await autobid.save();
+
+                    // Update auction
+                    auction.currentBid = nextBid;
+                    auction.currentWinner = bidderId;
+                    auction.totalBids += 1;
+
+                    await auction.save();
+
+                    // Log
+                    await createAuctionLog({
+                        auctionId,
+                        userId: bidderId,
+                        userName: getDisplayName(user),
+                        type: "AUTO_BID_TRIGGERED",
+                        details: {
+                            bidAmount: nextBid
+                        }
+                    });
+
+                    // Socket events
+                    if (io) {
+                        io.to(`auction:${auctionId}`).emit(
+                            "bid-update",
+                            {
+                                auctionId,
+                                currentBid: auction.currentBid,
+                                currentWinner: user._id,
+                                winnerName: getDisplayName(user),
+                                totalBids: auction.totalBids,
+                                timestamp: new Date()
+                            }
+                        );
+
+                        const lb =
+                            await buildAuctionLeaderboard(auctionId);
+
+                        io.to(`auction:${auctionId}`).emit(
+                            "leaderboard-update",
+                            {
+                                auctionId,
+                                leaderboard: lb.leaderboard,
+                                timestamp: new Date()
+                            }
+                        );
+                    }
+
+                    await invalidateAuctionMutationCaches({
+                        auctionId,
+                        previousStatus: "LIVE",
+                        nextStatus: auction.status,
+                        creatorId: auction.createdBy,
+                        affectedUserIds: [
+                            bidderId,
+                            previousWinnerId
+                        ]
+                    });
+
+                    bidPlacedThisCycle = true;
+
+                    // Only ONE bid while holding the lock
+                    break;
+                }
+
+            } finally {
+                // 3. Release lock immediately
+                await releaseDistributedLock(lock);
             }
-          });
 
-          if (io) {
-            io.to(`auction:${auctionId}`).emit("auction-extended", {
-              auctionId,
-              newEndTime: auction.endTime,
-              message: "Auction extended by 10 minutes!",
-              timestamp: new Date()
-            });
-          }
+            // Nothing else can bid
+            if (!bidPlacedThisCycle) {
+                break;
+            }
+
+            // 4. Wait OUTSIDE the lock
+            if (bidStepDelayMs > 0) {
+                await delay(bidStepDelayMs);
+            }
         }
 
-        if (io) {
-          io.to(`auction:${auctionId}`).emit("bid-update", {
-            auctionId,
-            currentBid: auction.currentBid,
-            currentWinner: user._id,
-            winnerName: getDisplayName(user),
-            totalBids: auction.totalBids,
-            timestamp: new Date()
-          });
-
-          const lb = await buildAuctionLeaderboard(auctionId);
-          io.to(`auction:${auctionId}`).emit("leaderboard-update", {
-            auctionId,
-            leaderboard: lb.leaderboard,
-            timestamp: new Date()
-          });
-        }
-
-        await invalidateAuctionMutationCaches({
-          auctionId,
-          previousStatus: "LIVE",
-          nextStatus: auction.status,
-          creatorId: auction.createdBy,
-          affectedUserIds: [bidderId, previousWinnerId],
-        });
-
-        bidPlacedThisCycle = true;
-        break; // Only one auto-bid step per cycle.
-      }
-
-      if (!bidPlacedThisCycle) break;
-
-      // Pace competing autobids so users can see rank changes progressively.
-      if (bidStepDelayMs > 0) {
-        await delay(bidStepDelayMs);
-      }
+    } catch (error) {
+        console.error("Error handling auto-bids:", error);
     }
-  } catch (error) {
-    console.error("Error handling auto-bids:", error);
-  } finally {
-    await releaseDistributedLock(lock);
-  }
 };
