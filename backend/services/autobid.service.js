@@ -110,6 +110,16 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
                         continue;
                     }
 
+                    // Ensure the autobid wasn't deactivated by the user 2ms ago! 
+                    const activeDoc = await AutoBid.findOne({ 
+                        _id: autobid._id, 
+                        isActive: true
+                    });
+                    if (!activeDoc) {
+                        // The user deactivated this autobid while we were in the loop
+                        continue; 
+                    }
+
                     // Place or update bid
                     let bid = await Bid.findOne({
                         auctionId,
