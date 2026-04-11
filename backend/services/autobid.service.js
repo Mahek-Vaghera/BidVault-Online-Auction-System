@@ -2,17 +2,28 @@ import Auction from "../models/auction.model.js";
 import AutoBid from "../models/autobid.model.js";
 import Bid from "../models/bid.model.js";
 import User from "../models/user.model.js";
-import { SendOutBidEmail } from "./mail_service/email.sender.js";
 import { createAuctionLog } from "./log.service.js";
 import { buildAuctionLeaderboard, getDisplayName } from "./leaderboard.service.js";
-import { acquireDistributedLock, releaseDistributedLock } from "./redis.service.js";
+import { acquireDistributedLock, releaseDistributedLock, redisSetNxPx, redisDel, redisSetEx } from "./redis.service.js";
 import { invalidateAuctionMutationCaches } from "./cache-invalidation.service.js";
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-
 export const handleAutoBids = async (auctionId, io = null, options = {}) => {
     const lockKey = `auction-bid-lock:${auctionId}`;
+    const workerKey = `autobid-worker-running:${auctionId}`;
+
+    // 1. Ensure only ONE auto-bid worker runs per auction at any given time (TTL: 120s)
+    if (!options.isChainedBatch) {
+        const acquiredWorker = await redisSetNxPx(workerKey, "running", 120000);
+        if (acquiredWorker !== "OK") {
+            // Another auto-bid worker is already actively processing this auction
+            return;
+        }
+    } else {
+        // Refresh worker lock TTL for the chained batch
+        await redisSetEx(workerKey, "running", 120);
+    }
 
     const bidStepDelayMs = Math.max(
         0,
@@ -23,9 +34,13 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
         ) || 0
     );
 
+    let hitMaxCycleLimit = false;
+    let isChaining = false;
+
     try {
         let cycleGuard = 0;
 
+        // Process a batch of up to 100 cycles
         while (cycleGuard < 100) {
             cycleGuard += 1;
 
@@ -72,7 +87,7 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
                     const bidderId = autobid.userId;
                     const previousWinnerId = auction.currentWinner;
 
-                    // Already winning
+                    // Skip if bidder is already the winning leader
                     if (
                         String(bidderId) ===
                         String(auction.currentWinner)
@@ -88,14 +103,14 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
 
                     const nextBid = currentBid + minIncrement;
 
-                    // Maximum limit reached
+                    // Maximum limit reached: deactivate this autobid
                     if (nextBid > autobid.maxLimit) {
                         autobid.isActive = false;
                         await autobid.save();
                         continue;
                     }
 
-                    // Place bid
+                    // Place or update bid
                     let bid = await Bid.findOne({
                         auctionId,
                         userId: bidderId
@@ -113,7 +128,7 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
                         });
                     }
 
-                    // Update AutoBid
+                    // Update AutoBid stats
                     autobid.lastBidAmount = nextBid;
                     autobid.lastTriggeredAt = new Date();
                     autobid.totalAutoBidsPlaced += 1;
@@ -123,10 +138,9 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
                     auction.currentBid = nextBid;
                     auction.currentWinner = bidderId;
                     auction.totalBids += 1;
-
                     await auction.save();
 
-                    // Log
+                    // Log audit trail
                     await createAuctionLog({
                         auctionId,
                         userId: bidderId,
@@ -137,7 +151,7 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
                         }
                     });
 
-                    // Socket events
+                    // Emit real-time socket events
                     if (io) {
                         io.to(`auction:${auctionId}`).emit(
                             "bid-update",
@@ -151,8 +165,7 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
                             }
                         );
 
-                        const lb =
-                            await buildAuctionLeaderboard(auctionId);
+                        const lb = await buildAuctionLeaderboard(auctionId);
 
                         io.to(`auction:${auctionId}`).emit(
                             "leaderboard-update",
@@ -191,13 +204,49 @@ export const handleAutoBids = async (auctionId, io = null, options = {}) => {
                 break;
             }
 
+            if (cycleGuard === 100) {
+                hitMaxCycleLimit = true;
+            }
+
             // 4. Wait OUTSIDE the lock
             if (bidStepDelayMs > 0) {
                 await delay(bidStepDelayMs);
             }
         }
 
+        // AUTOMATIC CHAINING LOGIC (NEXT BATCH TRIGGER)
+        if (hitMaxCycleLimit) {
+            const auction = await Auction.findById(auctionId);
+            if (auction && auction.status === "LIVE") {
+                const nextBid = auction.currentBid + auction.minIncrement;
+                const eligibleBidders = await AutoBid.countDocuments({
+                    auctionId,
+                    isActive: true,
+                    userId: { $ne: auction.currentWinner },
+                    maxLimit: { $gte: nextBid }
+                });
+
+                if (eligibleBidders > 0) {
+                    console.log(`[AutoBid] Batch of 100 finished. ${eligibleBidders} eligible autobidders remain. Scheduling next batch...`);
+                    isChaining = true;
+
+                    // Yield to event loop, then trigger next batch with fresh cycleGuard = 0
+                    setImmediate(() => {
+                        handleAutoBids(auctionId, io, { ...options, isChainedBatch: true }).catch((err) =>
+                            console.error("Error in chained auto-bid batch:", err)
+                        );
+                    });
+                    return; // Keep workerKey active so no other worker intervenes
+                }
+            }
+        }
+
     } catch (error) {
         console.error("Error handling auto-bids:", error);
+    } finally {
+        // Release workerKey only if not chaining to the next batch
+        if (!isChaining) {
+            await redisDel(workerKey);
+        }
     }
 };

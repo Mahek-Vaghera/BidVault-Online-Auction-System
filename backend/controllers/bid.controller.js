@@ -60,32 +60,28 @@ export const handlePlaceBid = catchErrors(async (req, res) => {
     const { auctionId } = req.params;
     const io = req.app.locals.io;
 
-    try {
-        // Validate bid logic
-        await validateBidLogic(auctionId, userId, bidAmount);
+    await validateBidLogic(auctionId, userId, bidAmount);
+    const result = await placeBidWithLock(auctionId, userId, bidAmount, io);
 
-        // Place bid with lock
-        const result = await placeBidWithLock(auctionId, userId, bidAmount, io);
+    // Respond to the manual bidder immediately!
+    res.status(200).json({
+        success: true,
+        message: `Your bid of ₹${bidAmount} has been placed successfully`,
+        data: {
+            bidAmount: result.bid.amount,
+            currentBid: result.auction.currentBid,
+            totalBids: result.auction.totalBids
+        }
+    });
 
-        // After manual bid, trigger auto-bids (other bidders might respond)
-        await handleAutoBids(auctionId, io);
-
-        return res.status(200).json({
-            success: true,
-            message: `Your bid of ₹${bidAmount} has been placed successfully`,
-            data: {
-                bidAmount: result.bid.amount,
-                currentBid: result.auction.currentBid,
-                totalBids: result.auction.totalBids
-            }
-        });
-    } catch (error) {
-        return res.status(400).json({
-            success: false,
-            message: error.message || "Failed to place bid"
-        });
-    }
+    // Trigger auto-bids asynchronously in the background (fire-and-forget)
+    setImmediate(() => {
+        handleAutoBids(auctionId, io).catch(err => 
+            console.error("Background auto-bid error:", err)
+        );
+    });
 });
+
 
 // Set autobid
 export const handleSetAutobid = catchErrors(async (req, res) => {
